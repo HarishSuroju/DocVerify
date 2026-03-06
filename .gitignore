@@ -5,6 +5,9 @@
 **/dist/
 **/build/
 
+# Runtime uploads
+**/uploads/
+
 # Local environment files (keep examples)
 **/.env
 **/.env.*
