@@ -69,6 +69,21 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  const forgotPassword = async (email) => {
+    const { data } = await api.post("/auth/forgot-password", { email });
+    return data;
+  };
+
+  const verifyResetOtp = async (email, otp) => {
+    const { data } = await api.post("/auth/verify-reset-otp", { email, otp });
+    return data;
+  };
+
+  const resetPassword = async (email, otp, password, confirmPassword) => {
+    const { data } = await api.post("/auth/reset-password", { email, otp, password, confirmPassword });
+    return data;
+  };
+
   const logout = async () => {
     try {
       await api.post("/auth/logout");
@@ -80,7 +95,20 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, resendVerification, verifyEmailOtp, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        login,
+        register,
+        resendVerification,
+        verifyEmailOtp,
+        forgotPassword,
+        verifyResetOtp,
+        resetPassword,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

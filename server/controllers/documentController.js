@@ -2,12 +2,88 @@ const Template = require("../models/Template");
 const Document = require("../models/Document");
 const User = require("../models/User");
 const Signature = require("../models/Signature");
+const Notification = require("../models/Notification");
 const { ApiError, sendResponse } = require("../utils/helpers");
+const { encryptString, decryptString, encryptJson, decryptJson } = require("../utils/fieldCrypto");
 const cloudService = require("../services/cloudService");
 const pdfService = require("../services/pdfService");
 const auditService = require("../services/auditService");
 const { createNotification } = require("../services/notificationService");
 const { sendDocumentAssignedEmail } = require("../services/emailService");
+
+const inferExpiryDateFromValues = (values = {}) => {
+  const keys = Object.keys(values || {});
+  const expiryKey = keys.find((k) => /(expiry|expires|end_date|enddate|valid_until)/i.test(k));
+  if (!expiryKey) return null;
+
+  const value = String(values[expiryKey] || "").trim();
+  if (!value) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+    const [day, month, year] = value.split("/").map(Number);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    if (
+      parsed.getUTCFullYear() !== year ||
+      parsed.getUTCMonth() !== month - 1 ||
+      parsed.getUTCDate() !== day
+    ) {
+      return null;
+    }
+    return parsed;
+  }
+
+  return null;
+};
+
+const maybeCreateExpiryNotification = async (doc, userId) => {
+  if (!doc.expiresAt) return;
+  if (doc.status === "completed") return;
+
+  const now = new Date();
+  const diffMs = new Date(doc.expiresAt).getTime() - now.getTime();
+  const within3Days = diffMs > 0 && diffMs <= 3 * 24 * 60 * 60 * 1000;
+  if (!within3Days) return;
+
+  const existing = await Notification.findOne({
+    userId,
+    type: "SYSTEM",
+    "metadata.documentId": doc._id,
+    "metadata.kind": "EXPIRY_REMINDER",
+  }).select("_id");
+
+  if (existing) return;
+
+  await createNotification({
+    userId,
+    type: "SYSTEM",
+    title: "Document Expiring Soon",
+    message: `\"${doc.title}\" will expire on ${new Date(doc.expiresAt).toLocaleDateString()}.`,
+    metadata: { documentId: doc._id, kind: "EXPIRY_REMINDER" },
+  });
+};
+
+const toClientDocument = (doc) => {
+  const base = typeof doc.toObject === "function" ? doc.toObject() : { ...doc };
+
+  if (base.content) {
+    try {
+      base.content = decryptString(base.content);
+    } catch {
+      // Return stored value for backward compatibility if decryption fails.
+    }
+  }
+
+  if (base.metadata?.encryptedFilledValues) {
+    base.metadata.filledValues = decryptJson(base.metadata.encryptedFilledValues);
+  }
+
+  return base;
+};
 
 const extractBlobNameFromUrl = (fileUrl) => {
   const parsed = new URL(fileUrl);
@@ -26,7 +102,7 @@ const extractBlobNameFromUrl = (fileUrl) => {
 // POST /api/documents/generate
 const generateDocument = async (req, res, next) => {
   try {
-    const { templateId, values } = req.body;
+    const { templateId, values, expiresAt } = req.body;
 
     const template = await Template.findById(templateId);
     if (!template || !template.isActive) throw new ApiError(404, "Template not found");
@@ -40,7 +116,7 @@ const generateDocument = async (req, res, next) => {
     const title = `${template.title} - ${new Date().toISOString().split("T")[0]}`;
 
     // Generate PDF
-    const pdfBuffer = await pdfService.generatePdfFromContent(title, filledContent);
+    const { pdfBuffer, signatureAnchors } = await pdfService.generatePdfFromContent(title, filledContent);
 
     // Upload to Azure
     const filename = `${Date.now()}-${template.title.replace(/\s+/g, "_")}.pdf`;
@@ -49,12 +125,16 @@ const generateDocument = async (req, res, next) => {
     const doc = await Document.create({
       templateId,
       title,
-      content: filledContent,
+      content: encryptString(filledContent),
       pdfUrl: url,
       status: "draft",
       assignedBy: req.user._id,
       source: "template",
-      metadata: { filledValues: values },
+      expiresAt: expiresAt ? new Date(expiresAt) : inferExpiryDateFromValues(values),
+      metadata: {
+        encryptedFilledValues: encryptJson(values || {}),
+        signatureAnchors,
+      },
     });
 
     await auditService.log({
@@ -66,7 +146,7 @@ const generateDocument = async (req, res, next) => {
       userAgent: req.get("user-agent"),
     });
 
-    sendResponse(res, 201, "Document generated", doc);
+    sendResponse(res, 201, "Document generated", toClientDocument(doc));
   } catch (err) {
     next(err);
   }
@@ -75,21 +155,23 @@ const generateDocument = async (req, res, next) => {
 // POST /api/documents/create-custom
 const createCustomDocument = async (req, res, next) => {
   try {
-    const { title, content } = req.body;
+    const { title, content, expiresAt } = req.body;
 
     // Generate PDF from raw content
-    const pdfBuffer = await pdfService.generatePdfFromContent(title, content);
+    const { pdfBuffer, signatureAnchors } = await pdfService.generatePdfFromContent(title, content);
 
     const filename = `${Date.now()}-custom-${title.replace(/\s+/g, "_")}.pdf`;
     const { url } = await cloudService.upload(pdfBuffer, "documents", filename, "application/pdf");
 
     const doc = await Document.create({
       title,
-      content,
+      content: encryptString(content),
       pdfUrl: url,
       status: "draft",
       assignedBy: req.user._id,
       source: "custom",
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+      metadata: { signatureAnchors },
     });
 
     await auditService.log({
@@ -102,7 +184,7 @@ const createCustomDocument = async (req, res, next) => {
       details: { source: "custom" },
     });
 
-    sendResponse(res, 201, "Custom document created", doc);
+    sendResponse(res, 201, "Custom document created", toClientDocument(doc));
   } catch (err) {
     next(err);
   }
@@ -119,16 +201,21 @@ const uploadDocument = async (req, res, next) => {
     }
 
     const title = req.body.title || req.file.originalname.replace(/\.pdf$/i, "");
+    const expiryDate = req.body.expiresAt ? new Date(req.body.expiresAt) : null;
+    if (expiryDate && Number.isNaN(expiryDate.getTime())) {
+      throw new ApiError(400, "Invalid expiresAt date");
+    }
     const filename = `${Date.now()}-${req.file.originalname.replace(/\s+/g, "_")}`;
     const { url } = await cloudService.upload(req.file.buffer, "documents", filename, req.file.mimetype);
 
     const doc = await Document.create({
       title,
-      content: `[Uploaded PDF] ${req.file.originalname}`,
+      content: encryptString(`[Uploaded PDF] ${req.file.originalname}`),
       pdfUrl: url,
       status: "draft",
       assignedBy: req.user._id,
       source: "upload",
+      expiresAt: expiryDate,
     });
 
     await auditService.log({
@@ -141,7 +228,7 @@ const uploadDocument = async (req, res, next) => {
       details: { source: "upload", originalName: req.file.originalname },
     });
 
-    sendResponse(res, 201, "Document uploaded", doc);
+    sendResponse(res, 201, "Document uploaded", toClientDocument(doc));
   } catch (err) {
     next(err);
   }
@@ -151,6 +238,8 @@ const uploadDocument = async (req, res, next) => {
 const getDocuments = async (req, res, next) => {
   try {
     const filter = {};
+    const now = new Date();
+    const soonCutoff = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
 
     // Regular users only see docs assigned to them
     if (req.user.role === "user") {
@@ -158,13 +247,55 @@ const getDocuments = async (req, res, next) => {
     }
 
     if (req.query.status) filter.status = req.query.status;
+    if (req.query.search) {
+      filter.title = { $regex: req.query.search.trim(), $options: "i" };
+    }
+
+    if (req.query.expiryFilter) {
+      switch (req.query.expiryFilter) {
+        case "expiring-soon":
+          filter.expiresAt = { $ne: null, $gt: now, $lte: soonCutoff };
+          break;
+        case "expired":
+          filter.expiresAt = { $ne: null, $lte: now };
+          break;
+        case "no-expiry":
+          filter.expiresAt = null;
+          break;
+        case "has-expiry":
+          filter.expiresAt = { $ne: null };
+          break;
+        default:
+          break;
+      }
+    }
+
+    const sortMap = {
+      created_desc: { createdAt: -1 },
+      created_asc: { createdAt: 1 },
+      expires_asc: { expiresAt: 1, createdAt: -1 },
+      expires_desc: { expiresAt: -1, createdAt: -1 },
+    };
+    const sort = sortMap[req.query.sort] || sortMap.created_desc;
 
     const docs = await Document.find(filter)
       .populate("assignedTo", "name email")
       .populate("assignedBy", "name email")
-      .sort("-createdAt");
+      .sort(sort);
 
-    sendResponse(res, 200, "Documents retrieved", docs);
+    await Promise.all(
+      docs.map(async (doc) => {
+        if (req.user.role === "admin") {
+          if (doc.assignedBy?._id) await maybeCreateExpiryNotification(doc, doc.assignedBy._id);
+          if (doc.assignedTo?._id) await maybeCreateExpiryNotification(doc, doc.assignedTo._id);
+          return;
+        }
+
+        await maybeCreateExpiryNotification(doc, req.user._id);
+      })
+    );
+
+    sendResponse(res, 200, "Documents retrieved", docs.map(toClientDocument));
   } catch (err) {
     next(err);
   }
@@ -189,7 +320,7 @@ const getDocumentById = async (req, res, next) => {
       throw new ApiError(403, "Access denied");
     }
 
-    sendResponse(res, 200, "Document retrieved", doc);
+    sendResponse(res, 200, "Document retrieved", toClientDocument(doc));
   } catch (err) {
     next(err);
   }
@@ -252,7 +383,7 @@ const assignDocument = async (req, res, next) => {
       }).catch(() => {});
     }
 
-    sendResponse(res, 200, "Document assigned", doc);
+    sendResponse(res, 200, "Document assigned", toClientDocument(doc));
   } catch (err) {
     next(err);
   }
@@ -268,7 +399,7 @@ const updateStatus = async (req, res, next) => {
     const doc = await Document.findByIdAndUpdate(req.params.id, { status }, { new: true });
     if (!doc) throw new ApiError(404, "Document not found");
 
-    sendResponse(res, 200, "Status updated", doc);
+    sendResponse(res, 200, "Status updated", toClientDocument(doc));
   } catch (err) {
     next(err);
   }

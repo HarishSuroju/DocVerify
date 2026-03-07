@@ -33,7 +33,7 @@ const getDashboard = async (req, res, next) => {
 const getUsers = async (req, res, next) => {
   try {
     const users = await User.find()
-      .select("name email role isVerified createdAt")
+      .select("name email role isVerified identityVerified createdAt")
       .sort("-createdAt");
     sendResponse(res, 200, "Users retrieved", users);
   } catch (err) {
@@ -96,6 +96,7 @@ const getVerifications = async (req, res, next) => {
 
     const verifications = await Verification.find(filter)
       .populate("userId", "name email")
+      .select("-otp")
       .sort("-createdAt");
 
     sendResponse(res, 200, "Verifications retrieved", verifications);
@@ -110,16 +111,21 @@ const reviewVerification = async (req, res, next) => {
     const { status } = req.body;
     if (!["verified", "rejected"].includes(status)) throw new ApiError(400, "Invalid status");
 
+    const existing = await Verification.findById(req.params.id);
+    if (!existing) throw new ApiError(404, "Verification not found");
+    if (!existing.otpVerified) {
+      throw new ApiError(400, "User OTP confirmation is required before admin review");
+    }
+
     const verification = await Verification.findByIdAndUpdate(
       req.params.id,
       { status, reviewedBy: req.user._id, reviewedAt: new Date() },
       { new: true }
-    );
-    if (!verification) throw new ApiError(404, "Verification not found");
+    ).populate("userId", "name email");
 
     // If verified, update user
     if (status === "verified") {
-      await User.findByIdAndUpdate(verification.userId, { isVerified: true });
+      await User.findByIdAndUpdate(verification.userId, { identityVerified: true });
     }
 
     sendResponse(res, 200, "Verification reviewed", verification);

@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate, Link } from "react-router-dom";
 import api from "../lib/api";
 import toast from "react-hot-toast";
 import DashboardLayout from "../components/DashboardLayout";
+import RichTextEditor from "../components/RichTextEditor";
 import {
   HiOutlineArrowLeft,
   HiOutlineRectangleStack,
@@ -12,6 +13,52 @@ import {
   HiOutlineDocumentText,
 } from "react-icons/hi2";
 
+const DATE_PLACEHOLDER_REGEX = /(date|dob|birth|expiry|expiration|issue_date|start_date|end_date)/i;
+
+const isDatePlaceholder = (placeholderName = "") => DATE_PLACEHOLDER_REGEX.test(placeholderName);
+
+const toDisplayDate = (isoDate) => {
+  if (!isoDate || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return "";
+  const [year, month, day] = isoDate.split("-");
+  return `${day}/${month}/${year}`;
+};
+
+const toIsoDate = (displayDate) => {
+  if (!displayDate || !/^\d{2}\/\d{2}\/\d{4}$/.test(displayDate)) return "";
+  const [day, month, year] = displayDate.split("/").map(Number);
+  const candidate = new Date(year, month - 1, day);
+
+  if (
+    candidate.getFullYear() !== year ||
+    candidate.getMonth() !== month - 1 ||
+    candidate.getDate() !== day
+  ) {
+    return "";
+  }
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+};
+
+const escapeHtml = (text = "") =>
+  text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const toPreviewHtml = (content = "") => {
+  if (!content) return "";
+  if (/<[^>]+>/.test(content)) return content;
+  return `<p>${escapeHtml(content).replace(/\n/g, "<br />")}</p>`;
+};
+
+const toIsoStartOfDay = (dateOnly) => {
+  if (!dateOnly) return null;
+  const parsed = new Date(`${dateOnly}T00:00:00.000Z`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+};
+
 export default function NewDocument() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -20,15 +67,19 @@ export default function NewDocument() {
   const [templates, setTemplates] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [values, setValues] = useState({});
+  const [dateErrors, setDateErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [templateExpiresAt, setTemplateExpiresAt] = useState("");
 
   // Scratch mode
   const [scratchTitle, setScratchTitle] = useState("");
   const [scratchContent, setScratchContent] = useState("");
+  const [scratchExpiresAt, setScratchExpiresAt] = useState("");
 
   // Upload mode
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadFile, setUploadFile] = useState(null);
+  const [uploadExpiresAt, setUploadExpiresAt] = useState("");
 
   useEffect(() => {
     api.get("/templates").then((res) => {
@@ -40,6 +91,7 @@ export default function NewDocument() {
           const init = {};
           r.data.data.placeholders.forEach((p) => (init[p] = ""));
           setValues(init);
+          setDateErrors({});
         });
       }
     });
@@ -51,15 +103,43 @@ export default function NewDocument() {
     const init = {};
     data.data.placeholders.forEach((p) => (init[p] = ""));
     setValues(init);
+    setDateErrors({});
   };
 
   const handleTemplateSubmit = async (e) => {
     e.preventDefault();
+
+    let mergedDateErrors = { ...dateErrors };
+
+    if (selectedTemplate?.placeholders?.length) {
+      const nextErrors = {};
+      for (const placeholder of selectedTemplate.placeholders) {
+        if (!isDatePlaceholder(placeholder)) continue;
+        const value = values[placeholder] || "";
+        if (!value) continue;
+
+        if (!toIsoDate(value)) {
+          nextErrors[placeholder] = "Use a valid date in dd/mm/yyyy";
+        }
+      }
+      if (Object.keys(nextErrors).length) {
+        mergedDateErrors = { ...mergedDateErrors, ...nextErrors };
+        setDateErrors(mergedDateErrors);
+      }
+    }
+
+    const invalidDate = Object.values(mergedDateErrors).some(Boolean);
+    if (invalidDate) {
+      toast.error("Fix date fields using dd/mm/yyyy format");
+      return;
+    }
+
     setLoading(true);
     try {
       await api.post("/documents/generate", {
         templateId: selectedTemplate._id,
         values,
+        expiresAt: toIsoStartOfDay(templateExpiresAt),
       });
       toast.success("Document generated");
       navigate("/documents");
@@ -80,6 +160,7 @@ export default function NewDocument() {
       await api.post("/documents/create-custom", {
         title: scratchTitle,
         content: scratchContent,
+        expiresAt: toIsoStartOfDay(scratchExpiresAt),
       });
       toast.success("Document created");
       navigate("/documents");
@@ -98,6 +179,10 @@ export default function NewDocument() {
       const formData = new FormData();
       formData.append("file", uploadFile);
       if (uploadTitle.trim()) formData.append("title", uploadTitle);
+      if (uploadExpiresAt) {
+        const normalized = toIsoStartOfDay(uploadExpiresAt);
+        if (normalized) formData.append("expiresAt", normalized);
+      }
 
       await api.post("/documents/upload", formData, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -215,14 +300,59 @@ export default function NewDocument() {
                   <label className="block text-sm font-medium text-gray-700 mb-1.5 capitalize">
                     {p.replace(/_/g, " ")}
                   </label>
-                  <input
-                    value={values[p] || ""}
-                    onChange={(e) => setValues((prev) => ({ ...prev, [p]: e.target.value }))}
-                    className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-                    placeholder={`Enter ${p.replace(/_/g, " ")}`}
-                  />
+                  {isDatePlaceholder(p) ? (
+                    <div>
+                      <div className="grid grid-cols-[1fr_auto] gap-2">
+                        <input
+                          value={values[p] || ""}
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/[^0-9/]/g, "").slice(0, 10);
+                            setValues((prev) => ({ ...prev, [p]: raw }));
+
+                            if (!raw || /^\d{2}\/\d{2}\/\d{4}$/.test(raw)) {
+                              setDateErrors((prev) => ({ ...prev, [p]: "" }));
+                              return;
+                            }
+
+                            setDateErrors((prev) => ({ ...prev, [p]: "Use dd/mm/yyyy format" }));
+                          }}
+                          className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                          placeholder="dd/mm/yyyy"
+                          inputMode="numeric"
+                        />
+                        <input
+                          type="date"
+                          value={toIsoDate(values[p] || "")}
+                          onChange={(e) => {
+                            setValues((prev) => ({ ...prev, [p]: toDisplayDate(e.target.value) }));
+                            setDateErrors((prev) => ({ ...prev, [p]: "" }));
+                          }}
+                          className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                          aria-label={`${p} date picker`}
+                        />
+                      </div>
+                      {dateErrors[p] && <p className="text-red-500 text-xs mt-1.5">{dateErrors[p]}</p>}
+                    </div>
+                  ) : (
+                    <input
+                      value={values[p] || ""}
+                      onChange={(e) => setValues((prev) => ({ ...prev, [p]: e.target.value }))}
+                      className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                      placeholder={`Enter ${p.replace(/_/g, " ")}`}
+                    />
+                  )}
                 </div>
               ))}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Expiry Date (optional)</label>
+                <input
+                  type="date"
+                  value={templateExpiresAt}
+                  onChange={(e) => setTemplateExpiresAt(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                />
+                <p className="text-xs text-gray-400 mt-1">Expiry reminders will be generated before this date.</p>
+              </div>
               <div className="pt-2">
                 <button
                   type="submit"
@@ -243,8 +373,8 @@ export default function NewDocument() {
               <h3 className="text-sm font-semibold text-gray-900">Live Preview</h3>
             </div>
             <div className="bg-gray-50 rounded-xl p-5 min-h-[300px]">
-              <div className="whitespace-pre-wrap text-sm text-gray-700 font-mono leading-relaxed">
-                {preview}
+              <div className="text-sm text-gray-700 leading-relaxed [&_h1]:text-xl [&_h1]:font-bold [&_h2]:text-lg [&_h2]:font-semibold [&_p]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5">
+                <div dangerouslySetInnerHTML={{ __html: toPreviewHtml(preview) }} />
               </div>
             </div>
           </div>
@@ -269,12 +399,20 @@ export default function NewDocument() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Content</label>
-                <textarea
+                <RichTextEditor
                   value={scratchContent}
-                  onChange={(e) => setScratchContent(e.target.value)}
-                  rows={16}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition resize-none"
-                  placeholder="Type your document content here..."
+                  onChange={setScratchContent}
+                  minHeight={340}
+                  placeholder="Type your document content with formatting..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Expiry Date (optional)</label>
+                <input
+                  type="date"
+                  value={scratchExpiresAt}
+                  onChange={(e) => setScratchExpiresAt(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
                 />
               </div>
               <div className="pt-2">
@@ -298,8 +436,12 @@ export default function NewDocument() {
             </div>
             <div className="bg-gray-50 rounded-xl p-5 min-h-[300px]">
               {scratchTitle && <p className="font-bold text-gray-900 text-base mb-3">{scratchTitle}</p>}
-              <div className="whitespace-pre-wrap text-sm text-gray-700 font-mono leading-relaxed">
-                {scratchContent || <span className="text-gray-300">Your content will appear here...</span>}
+              <div className="text-sm text-gray-700 leading-relaxed [&_h1]:text-xl [&_h1]:font-bold [&_h2]:text-lg [&_h2]:font-semibold [&_p]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5">
+                {scratchContent ? (
+                  <div dangerouslySetInnerHTML={{ __html: toPreviewHtml(scratchContent) }} />
+                ) : (
+                  <span className="text-gray-300">Your content will appear here...</span>
+                )}
               </div>
             </div>
           </div>
@@ -355,6 +497,15 @@ export default function NewDocument() {
                     </div>
                   )}
                 </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Expiry Date (optional)</label>
+                <input
+                  type="date"
+                  value={uploadExpiresAt}
+                  onChange={(e) => setUploadExpiresAt(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                />
               </div>
               <div className="pt-2">
                 <button

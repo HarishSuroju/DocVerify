@@ -11,7 +11,11 @@ const verifyToken = async (req, res, next) => {
     }
 
     const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, env.ACCESS_TOKEN_SECRET);
+    const decoded = jwt.verify(token, env.ACCESS_TOKEN_SECRET, {
+      algorithms: ["HS256"],
+      issuer: env.JWT_ISSUER,
+      audience: env.JWT_AUDIENCE,
+    });
 
     const user = await User.findById(decoded.id).select("-password -refreshToken");
     if (!user) {

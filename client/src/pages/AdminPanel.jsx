@@ -23,19 +23,22 @@ export default function AdminPanel() {
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [verifications, setVerifications] = useState([]);
   const [tab, setTab] = useState("overview");
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [dashRes, usersRes, logsRes] = await Promise.all([
+        const [dashRes, usersRes, logsRes, verRes] = await Promise.all([
           api.get("/admin/dashboard"),
           api.get("/admin/users"),
           api.get("/admin/audit-logs?limit=20"),
+          api.get("/admin/verifications"),
         ]);
         setStats(dashRes.data.data.stats);
         setUsers(usersRes.data.data);
         setLogs(logsRes.data.data.logs);
+        setVerifications(verRes.data.data || []);
       } catch {
         toast.error("Failed to load admin data");
       }
@@ -55,8 +58,19 @@ export default function AdminPanel() {
   const tabs = [
     { key: "overview", label: "Overview" },
     { key: "users", label: "Users" },
+    { key: "verifications", label: "Verifications" },
     { key: "audit", label: "Audit Log" },
   ];
+
+  const reviewVerification = async (id, status) => {
+    try {
+      const { data } = await api.patch(`/admin/verifications/${id}`, { status });
+      setVerifications((prev) => prev.map((v) => (v._id === id ? data.data : v)));
+      toast.success(`Verification ${status}`);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Verification review failed");
+    }
+  };
 
   const statCards = stats
     ? [
@@ -183,10 +197,10 @@ export default function AdminPanel() {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      {u.isVerified ? (
+                      {u.identityVerified ? (
                         <span className="flex items-center gap-1 text-xs text-green-600 font-medium">
                           <HiOutlineCheckBadge className="w-3.5 h-3.5" />
-                          Verified
+                          Identity Verified
                         </span>
                       ) : (
                         <span className="text-xs text-gray-400">Pending</span>
@@ -204,6 +218,88 @@ export default function AdminPanel() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* Verifications */}
+      {tab === "verifications" && (
+        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+          {verifications.length === 0 ? (
+            <div className="py-14 text-center text-sm text-gray-400">No verification requests</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-50">
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">User</th>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">Document</th>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">OTP</th>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">Status</th>
+                    <th className="text-left px-6 py-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {verifications.map((v, i) => (
+                    <tr key={v._id} className={i !== verifications.length - 1 ? "border-b border-gray-50" : ""}>
+                      <td className="px-6 py-4">
+                        <div className="font-medium text-gray-900">{v.userId?.name || "Unknown"}</div>
+                        <div className="text-xs text-gray-400">{v.userId?.email || "-"}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-gray-900 capitalize">{String(v.documentType || "-").replace(/_/g, " ")}</div>
+                        <a href={v.documentUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
+                          Open ID Document
+                        </a>
+                        {v.selfieUrl && (
+                          <div>
+                            <a href={v.selfieUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
+                              Open Selfie
+                            </a>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-xs font-medium">
+                        <span className={v.otpVerified ? "text-green-600" : "text-amber-600"}>
+                          {v.otpVerified ? "Confirmed" : "Pending"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`text-[11px] px-2.5 py-1 rounded-lg font-semibold uppercase tracking-wide border ${
+                          v.status === "verified"
+                            ? "bg-green-50 text-green-700 border-green-200"
+                            : v.status === "rejected"
+                            ? "bg-red-50 text-red-700 border-red-200"
+                            : "bg-amber-50 text-amber-700 border-amber-200"
+                        }`}>
+                          {v.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        {v.status === "pending" ? (
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => reviewVerification(v._id, "verified")}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-green-600 text-white hover:bg-green-700 cursor-pointer"
+                            >
+                              Verify
+                            </button>
+                            <button
+                              onClick={() => reviewVerification(v._id, "rejected")}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700 cursor-pointer"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">Reviewed</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

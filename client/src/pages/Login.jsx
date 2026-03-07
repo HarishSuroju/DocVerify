@@ -5,7 +5,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import toast from "react-hot-toast";
 import { useState } from "react";
-import { HiOutlineDocumentText } from "react-icons/hi2";
+import { HiOutlineDocumentText, HiOutlineEye, HiOutlineEyeSlash } from "react-icons/hi2";
 
 const schema = z.object({
   email: z.string().email("Invalid email"),
@@ -19,6 +19,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [needsVerification, setNeedsVerification] = useState(Boolean(location.state?.needsVerification));
+  const [showPassword, setShowPassword] = useState(false);
 
   const {
     register,
@@ -150,13 +151,28 @@ export default function Login() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
-              <input
-                type="password"
-                {...register("password")}
-                className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder:text-gray-400"
-                placeholder="••••••••"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  {...register("password")}
+                  className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 pr-11 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder:text-gray-400"
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute inset-y-0 right-0 px-3 text-gray-500 hover:text-gray-700 cursor-pointer"
+                >
+                  {showPassword ? <HiOutlineEyeSlash className="w-5 h-5" /> : <HiOutlineEye className="w-5 h-5" />}
+                </button>
+              </div>
               {errors.password && <p className="text-red-500 text-xs mt-1.5">{errors.password.message}</p>}
+              <div className="mt-2 text-right">
+                <Link to="/forgot-password" className="text-xs font-semibold text-blue-600 hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
             </div>
 
             <button

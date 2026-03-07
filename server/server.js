@@ -18,6 +18,7 @@ const documentRoutes = require("./routes/documentRoutes");
 const signatureRoutes = require("./routes/signatureRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const verificationRoutes = require("./routes/verificationRoutes");
 
 const app = express();
 
@@ -36,14 +37,32 @@ app.use(cookieParser());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 min
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, message: "Too many requests, please try again later" },
-});
-app.use("/api", limiter);
+const isProd = env.NODE_ENV === "production";
+
+if (isProd) {
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 min
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    // Auth routes have a dedicated limiter below.
+    skip: (req) => req.path.startsWith("/auth"),
+    message: { success: false, message: "Too many requests, please try again later" },
+  });
+
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 min
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    message: { success: false, message: "Too many login attempts, please try again later" },
+  });
+
+  app.use("/api", apiLimiter);
+  app.use("/api/auth/login", authLimiter);
+  app.use("/api/auth/forgot-password", authLimiter);
+}
 
 // --- Routes ---
 app.get("/api/health", (_req, res) => {
@@ -56,6 +75,7 @@ app.use("/api/documents", documentRoutes);
 app.use("/api/signatures", signatureRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/verifications", verificationRoutes);
 
 // --- Error Handling ---
 app.use(errorHandler);

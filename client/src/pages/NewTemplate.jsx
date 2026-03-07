@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import api from "../lib/api";
 import toast from "react-hot-toast";
 import DashboardLayout from "../components/DashboardLayout";
+import RichTextEditor from "../components/RichTextEditor";
 import { HiOutlineArrowLeft, HiOutlineCodeBracket } from "react-icons/hi2";
 import { Link } from "react-router-dom";
 
@@ -20,10 +21,14 @@ export default function NewTemplate() {
 
   const {
     register,
+    control,
     handleSubmit,
     formState: { errors },
     watch,
-  } = useForm({ resolver: zodResolver(schema) });
+  } = useForm({
+    resolver: zodResolver(schema),
+    defaultValues: { title: "", content: "" },
+  });
 
   const content = watch("content", "");
   const placeholders = [...new Set((content.match(/\{\{(\w+)\}\}/g) || []).map((m) => m.replace(/\{|\}/g, "")))];
@@ -74,11 +79,17 @@ export default function NewTemplate() {
                     — Use {"{{placeholder}}"} for dynamic fields
                   </span>
                 </label>
-                <textarea
-                  {...register("content")}
-                  rows={14}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition resize-none"
-                  placeholder={`This agreement is made between {{company_name}} and {{employee_name}} on {{date}}...`}
+                <Controller
+                  name="content"
+                  control={control}
+                  render={({ field }) => (
+                    <RichTextEditor
+                      value={field.value || ""}
+                      onChange={field.onChange}
+                      minHeight={320}
+                      placeholder="Type your agreement content with headings, bullets, and placeholders..."
+                    />
+                  )}
                 />
                 {errors.content && <p className="text-red-500 text-xs mt-1.5">{errors.content.message}</p>}
               </div>
@@ -136,6 +147,8 @@ export default function NewTemplate() {
               <p className="text-[11px] uppercase tracking-wider text-gray-400 font-semibold mb-2">Tips</p>
               <ul className="space-y-2 text-xs text-gray-500">
                 <li>• Use descriptive names like <code className="bg-gray-50 px-1 rounded">full_name</code></li>
+                <li>• Use <code className="bg-gray-50 px-1 rounded">start_date</code> style names for calendar fields</li>
+                <li>• Add <code className="bg-gray-50 px-1 rounded">{"{{sender_signature}}"}</code> and <code className="bg-gray-50 px-1 rounded">{"{{receiver_signature}}"}</code> where signatures should appear</li>
                 <li>• Placeholders are case-sensitive</li>
                 <li>• Users fill in values when generating docs</li>
               </ul>

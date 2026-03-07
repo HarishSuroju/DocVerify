@@ -7,22 +7,30 @@ import {
   HiOutlineDocumentText,
   HiOutlinePlus,
   HiOutlineFunnel,
+  HiOutlineMagnifyingGlass,
 } from "react-icons/hi2";
 
 export default function Documents() {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
+  const [search, setSearch] = useState("");
+  const [expiryFilter, setExpiryFilter] = useState("");
+  const [sort, setSort] = useState("created_desc");
 
   useEffect(() => {
     setLoading(true);
-    const params = filter ? { status: filter } : {};
+    const params = {};
+    if (filter) params.status = filter;
+    if (search.trim()) params.search = search.trim();
+    if (expiryFilter) params.expiryFilter = expiryFilter;
+    if (sort) params.sort = sort;
     api
       .get("/documents", { params })
       .then((res) => setDocuments(res.data.data))
       .catch(() => toast.error("Failed to load documents"))
       .finally(() => setLoading(false));
-  }, [filter]);
+  }, [filter, search, expiryFilter, sort]);
 
   const statusStyles = {
     draft: "bg-gray-50 text-gray-600 border-gray-200",
@@ -50,9 +58,39 @@ export default function Documents() {
         </Link>
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-2 mb-6">
+      {/* Filters + Search */}
+      <div className="flex flex-wrap items-center gap-3 mb-6">
+        <div className="relative">
+          <HiOutlineMagnifyingGlass className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search document title"
+            className="w-64 border border-gray-200 rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
         <HiOutlineFunnel className="w-4 h-4 text-gray-400" />
+        <select
+          value={expiryFilter}
+          onChange={(e) => setExpiryFilter(e.target.value)}
+          className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="">All Expiry States</option>
+          <option value="expiring-soon">Expiring Soon</option>
+          <option value="expired">Expired</option>
+          <option value="no-expiry">No Expiry</option>
+          <option value="has-expiry">Has Expiry</option>
+        </select>
+        <select
+          value={sort}
+          onChange={(e) => setSort(e.target.value)}
+          className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="created_desc">Newest First</option>
+          <option value="created_asc">Oldest First</option>
+          <option value="expires_asc">Expiry Soonest</option>
+          <option value="expires_desc">Expiry Latest</option>
+        </select>
         <div className="flex gap-1.5">
           {filters.map((s) => (
             <button
@@ -113,15 +151,41 @@ export default function Documents() {
                       year: "numeric",
                     })}
                   </p>
+                  <p className="text-xs mt-1">
+                    <span className="text-gray-400">Expires:</span>{" "}
+                    <span className={doc.expiresAt ? "text-gray-600" : "text-gray-400"}>
+                      {doc.expiresAt
+                        ? new Date(doc.expiresAt).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })
+                        : "No expiry"}
+                    </span>
+                  </p>
                 </div>
               </div>
-              <span
-                className={`text-[11px] px-2.5 py-1 rounded-lg font-semibold uppercase tracking-wide border ${
-                  statusStyles[doc.status] || "bg-gray-50 text-gray-600 border-gray-200"
-                }`}
-              >
-                {doc.status}
-              </span>
+              <div className="flex flex-col items-end gap-1.5">
+                <span
+                  className={`text-[11px] px-2.5 py-1 rounded-lg font-semibold uppercase tracking-wide border ${
+                    statusStyles[doc.status] || "bg-gray-50 text-gray-600 border-gray-200"
+                  }`}
+                >
+                  {doc.status}
+                </span>
+                {doc.expiresAt &&
+                  new Date(doc.expiresAt).getTime() > Date.now() &&
+                  new Date(doc.expiresAt).getTime() <= Date.now() + 3 * 24 * 60 * 60 * 1000 && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 font-semibold uppercase tracking-wide">
+                    Expiring Soon
+                  </span>
+                )}
+                {doc.expiresAt && new Date(doc.expiresAt).getTime() <= Date.now() && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-200 font-semibold uppercase tracking-wide">
+                    Expired
+                  </span>
+                )}
+              </div>
             </Link>
           ))}
         </div>

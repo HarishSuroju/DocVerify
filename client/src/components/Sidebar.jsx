@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/api";
 import {
@@ -8,6 +8,7 @@ import {
   HiOutlineRectangleStack,
   HiOutlineBellAlert,
   HiOutlineShieldCheck,
+  HiOutlineIdentification,
   HiOutlineArrowRightOnRectangle,
 } from "react-icons/hi2";
 
@@ -15,26 +16,43 @@ export default function Sidebar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [unreadCount, setUnreadCount] = useState(0);
+  const timerRef = useRef(null);
 
   useEffect(() => {
     let mounted = true;
+
+    const hasToken = Boolean(localStorage.getItem("accessToken"));
+    if (!user || !hasToken) {
+      setUnreadCount(0);
+      return () => {
+        mounted = false;
+      };
+    }
 
     const loadUnread = async () => {
       try {
         const { data } = await api.get("/notifications/unread-count");
         if (mounted) setUnreadCount(data.data?.unread || 0);
-      } catch {
+      } catch (err) {
         if (mounted) setUnreadCount(0);
+
+        if (err.response?.status === 401 && timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
       }
     };
 
     loadUnread();
-    const timer = setInterval(loadUnread, 20000);
+    timerRef.current = setInterval(loadUnread, 20000);
     return () => {
       mounted = false;
-      clearInterval(timer);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
     };
-  }, []);
+  }, [user]);
 
   const handleLogout = async () => {
     await logout();
@@ -45,6 +63,7 @@ export default function Sidebar() {
     { to: "/dashboard", label: "Dashboard", icon: HiOutlineHome },
     { to: "/templates", label: "Templates", icon: HiOutlineRectangleStack },
     { to: "/documents", label: "Documents", icon: HiOutlineDocumentText },
+    { to: "/verify-identity", label: "Identity Verification", icon: HiOutlineIdentification },
     { to: "/notifications", label: "Notifications", icon: HiOutlineBellAlert },
   ];
 

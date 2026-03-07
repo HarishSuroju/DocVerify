@@ -3,6 +3,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import ForgotPassword from "./pages/ForgotPassword";
 import Dashboard from "./pages/Dashboard";
 import Templates from "./pages/Templates";
 import NewTemplate from "./pages/NewTemplate";
@@ -12,6 +13,7 @@ import DocumentDetail from "./pages/DocumentDetail";
 import AdminPanel from "./pages/AdminPanel";
 import VerifyEmail from "./pages/VerifyEmail";
 import Notifications from "./pages/Notifications";
+import VerifyIdentity from "./pages/VerifyIdentity";
 
 function App() {
   return (
@@ -21,6 +23,7 @@ function App() {
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/verify-email" element={<VerifyEmail />} />
 
         {/* Protected — each page has its own DashboardLayout */}
@@ -31,6 +34,7 @@ function App() {
         <Route path="/documents/new" element={<ProtectedRoute><NewDocument /></ProtectedRoute>} />
         <Route path="/documents/:id" element={<ProtectedRoute><DocumentDetail /></ProtectedRoute>} />
         <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+        <Route path="/verify-identity" element={<ProtectedRoute><VerifyIdentity /></ProtectedRoute>} />
         <Route path="/admin" element={<ProtectedRoute adminOnly><AdminPanel /></ProtectedRoute>} />
 
         {/* Fallback */}

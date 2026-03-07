@@ -39,6 +39,10 @@ const documentSchema = new mongoose.Schema(
       enum: ["template", "custom", "upload"],
       default: "template",
     },
+    expiresAt: {
+      type: Date,
+      default: null,
+    },
     requiresVerification: {
       type: Boolean,
       default: false,

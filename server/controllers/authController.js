@@ -5,19 +5,29 @@ const User = require("../models/User");
 const { ApiError, sendResponse } = require("../utils/helpers");
 const config = require("../config/env");
 const auditService = require("../services/auditService");
-const { sendVerificationEmail } = require("../services/emailService");
+const { sendVerificationEmail, sendPasswordResetEmail } = require("../services/emailService");
 
 const OTP_EXPIRY_MS = 10 * 60 * 1000;
 
 const generateOtp = () => crypto.randomInt(100000, 1000000).toString();
 const hashOtp = (otp) => crypto.createHash("sha256").update(otp).digest("hex");
+const hashRefreshToken = (token) =>
+  crypto.createHash("sha256").update(`${token}:${config.REFRESH_TOKEN_SECRET}`).digest("hex");
 
 const signTokens = (userId) => {
   const accessToken = jwt.sign({ id: userId }, config.ACCESS_TOKEN_SECRET, {
+    algorithm: "HS256",
     expiresIn: config.ACCESS_TOKEN_EXPIRY,
+    issuer: config.JWT_ISSUER,
+    audience: config.JWT_AUDIENCE,
+    subject: String(userId),
   });
   const refreshToken = jwt.sign({ id: userId }, config.REFRESH_TOKEN_SECRET, {
+    algorithm: "HS256",
     expiresIn: config.REFRESH_TOKEN_EXPIRY,
+    issuer: config.JWT_ISSUER,
+    audience: config.JWT_AUDIENCE,
+    subject: String(userId),
   });
   return { accessToken, refreshToken };
 };
@@ -58,7 +68,14 @@ const register = async (req, res, next) => {
     });
 
     sendResponse(res, 201, "Registration successful. Enter the OTP sent to your email to verify your account.", {
-      user: { id: user._id, name: user.name, email: user.email, role: user.role, isVerified: false },
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isVerified: false,
+        identityVerified: false,
+      },
       requiresEmailVerification: true,
     });
   } catch (err) {
@@ -131,7 +148,7 @@ const login = async (req, res, next) => {
     }
 
     const { accessToken, refreshToken } = signTokens(user._id);
-    user.refreshToken = refreshToken;
+    user.refreshToken = hashRefreshToken(refreshToken);
     await user.save();
 
     await auditService.log({
@@ -143,7 +160,14 @@ const login = async (req, res, next) => {
     });
 
     sendResponse(res, 200, "Login successful", {
-      user: { id: user._id, name: user.name, email: user.email, role: user.role },
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isVerified: user.isVerified,
+        identityVerified: user.identityVerified,
+      },
       accessToken,
       refreshToken,
     });
@@ -180,6 +204,90 @@ const resendVerification = async (req, res, next) => {
   }
 };
 
+// POST /api/auth/forgot-password
+const forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    const user = await User.findOne({ email });
+
+    // Generic response to prevent account enumeration.
+    if (!user) {
+      sendResponse(res, 200, "If the account exists, a password reset OTP has been sent.");
+      return;
+    }
+
+    const resetOtp = generateOtp();
+    user.passwordResetToken = hashOtp(resetOtp);
+    user.passwordResetTokenExpiry = new Date(Date.now() + OTP_EXPIRY_MS);
+    await user.save();
+
+    sendPasswordResetEmail(user.email, user.name, resetOtp).catch(() => {});
+    sendResponse(res, 200, "If the account exists, a password reset OTP has been sent.");
+  } catch (err) {
+    next(err);
+  }
+};
+
+// POST /api/auth/verify-reset-otp
+const verifyResetOtp = async (req, res, next) => {
+  try {
+    const { email, otp } = req.body;
+    const user = await User.findOne({ email });
+
+    if (!user) throw new ApiError(400, "Invalid email or OTP");
+
+    if (!user.passwordResetToken || !user.passwordResetTokenExpiry || user.passwordResetTokenExpiry <= new Date()) {
+      throw new ApiError(400, "OTP expired. Please request a new OTP.");
+    }
+
+    const hashedOtp = hashOtp(otp);
+    if (user.passwordResetToken !== hashedOtp) {
+      throw new ApiError(400, "Invalid email or OTP");
+    }
+
+    sendResponse(res, 200, "OTP verified successfully");
+  } catch (err) {
+    next(err);
+  }
+};
+
+// POST /api/auth/reset-password
+const resetPassword = async (req, res, next) => {
+  try {
+    const { email, otp, password } = req.body;
+    const user = await User.findOne({ email }).select("+password");
+
+    if (!user) throw new ApiError(400, "Invalid email or OTP");
+
+    if (!user.passwordResetToken || !user.passwordResetTokenExpiry || user.passwordResetTokenExpiry <= new Date()) {
+      throw new ApiError(400, "OTP expired. Please request a new OTP.");
+    }
+
+    const hashedOtp = hashOtp(otp);
+    if (user.passwordResetToken !== hashedOtp) {
+      throw new ApiError(400, "Invalid email or OTP");
+    }
+
+    user.password = await bcrypt.hash(password, 12);
+    user.passwordResetToken = null;
+    user.passwordResetTokenExpiry = null;
+    user.refreshToken = null;
+    await user.save();
+
+    await auditService.log({
+      action: "PASSWORD_RESET",
+      performedBy: user._id,
+      performedByRole: user.role,
+      ipAddress: req.ip,
+      userAgent: req.get("user-agent"),
+    });
+
+    sendResponse(res, 200, "Password reset successful. Please log in with your new password.");
+  } catch (err) {
+    next(err);
+  }
+};
+
 // POST /api/auth/refresh
 const refresh = async (req, res, next) => {
   try {
@@ -188,18 +296,27 @@ const refresh = async (req, res, next) => {
 
     let payload;
     try {
-      payload = jwt.verify(refreshToken, config.REFRESH_TOKEN_SECRET);
+      payload = jwt.verify(refreshToken, config.REFRESH_TOKEN_SECRET, {
+        algorithms: ["HS256"],
+        issuer: config.JWT_ISSUER,
+        audience: config.JWT_AUDIENCE,
+      });
     } catch {
       throw new ApiError(401, "Invalid or expired refresh token");
     }
 
     const user = await User.findById(payload.id);
-    if (!user || user.refreshToken !== refreshToken) {
+    const incomingHash = hashRefreshToken(refreshToken);
+    const matchesStoredHash = user?.refreshToken === incomingHash;
+    // Backward compatibility for users who logged in before token hashing rollout.
+    const matchesLegacyPlain = user?.refreshToken === refreshToken;
+
+    if (!user || (!matchesStoredHash && !matchesLegacyPlain)) {
       throw new ApiError(401, "Invalid refresh token");
     }
 
     const tokens = signTokens(user._id);
-    user.refreshToken = tokens.refreshToken;
+    user.refreshToken = hashRefreshToken(tokens.refreshToken);
     await user.save();
 
     sendResponse(res, 200, "Token refreshed", tokens);
@@ -221,8 +338,19 @@ const logout = async (req, res, next) => {
 
 // GET /api/auth/me
 const getMe = async (req, res) => {
-  const { _id, name, email, role, isVerified, createdAt } = req.user;
-  sendResponse(res, 200, "Profile retrieved", { id: _id, name, email, role, isVerified, createdAt });
+  const { _id, name, email, role, isVerified, identityVerified, createdAt } = req.user;
+  sendResponse(res, 200, "Profile retrieved", { id: _id, name, email, role, isVerified, identityVerified, createdAt });
 };
 
-module.exports = { register, login, refresh, logout, getMe, verifyEmailOtp, resendVerification };
+module.exports = {
+  register,
+  login,
+  refresh,
+  logout,
+  getMe,
+  verifyEmailOtp,
+  resendVerification,
+  forgotPassword,
+  verifyResetOtp,
+  resetPassword,
+};

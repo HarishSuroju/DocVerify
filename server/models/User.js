@@ -30,6 +30,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    identityVerified: {
+      type: Boolean,
+      default: false,
+    },
     verificationDocUrl: {
       type: String,
       default: null,
@@ -43,6 +47,14 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
     verificationTokenExpiry: {
+      type: Date,
+      default: null,
+    },
+    passwordResetToken: {
+      type: String,
+      default: null,
+    },
+    passwordResetTokenExpiry: {
       type: Date,
       default: null,
     },

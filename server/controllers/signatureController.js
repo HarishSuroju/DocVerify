@@ -77,7 +77,17 @@ const signDocument = async (req, res, next) => {
     const pdfResponse = await fetch(origSasUrl);
     const pdfBuffer = Buffer.from(await pdfResponse.arrayBuffer());
 
-    const signedPdfBuffer = await pdfService.embedSignatureInPdf(pdfBuffer, sigBuffer, signerRole);
+    let signedPdfBuffer;
+    try {
+      signedPdfBuffer = await pdfService.embedSignatureInPdf(
+        pdfBuffer,
+        sigBuffer,
+        signerRole,
+        doc.metadata?.signatureAnchors || {}
+      );
+    } catch (error) {
+      throw new ApiError(400, error.message || "Signature placeholder is missing in the document");
+    }
 
     const signedFilename = `${Date.now()}-signed-${doc._id}.pdf`;
     const { url: signedPdfUrl } = await cloudService.upload(

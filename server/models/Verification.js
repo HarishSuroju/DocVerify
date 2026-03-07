@@ -16,18 +16,26 @@ const verificationSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    selfieUrl: {
+      type: String,
+      default: null,
+    },
     otp: {
       type: String,
-      required: true,
+      default: null,
     },
     otpExpiresAt: {
       type: Date,
-      required: true,
+      default: null,
     },
     status: {
       type: String,
       enum: ["pending", "verified", "rejected"],
       default: "pending",
+    },
+    otpVerified: {
+      type: Boolean,
+      default: false,
     },
     reviewedBy: {
       type: mongoose.Schema.Types.ObjectId,
