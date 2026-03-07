@@ -48,10 +48,8 @@ const documentSchema = new mongoose.Schema(
       default: false,
     },
     metadata: {
-      filledValues: {
-        type: mongoose.Schema.Types.Mixed,
-        default: {},
-      },
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
   },
   { timestamps: true }

@@ -262,7 +262,8 @@ const embedSignatureInPdf = async (
   pdfBuffer,
   signatureImageBuffer,
   signerRole = "receiver",
-  signatureAnchors = {}
+  signatureAnchors = {},
+  manualPlacement = null
 ) => {
   const pdfDoc = await PDFDocument.load(pdfBuffer);
   const pngImage = await pdfDoc.embedPng(signatureImageBuffer);
@@ -275,7 +276,15 @@ const embedSignatureInPdf = async (
   let signatureY = 0;
   let sigWidth = 170;
 
-  if (anchor) {
+  if (manualPlacement) {
+    const targetPageIndex = Math.max(0, (manualPlacement.page || 1) - 1);
+    page = pages[targetPageIndex] || pages[pages.length - 1];
+
+    const { width, height } = page.getSize();
+    sigWidth = Math.max(60, Math.min(manualPlacement.width || 170, 320, width - 20));
+    signatureX = Math.max(0, Math.min(manualPlacement.x || 0, width - sigWidth - 1));
+    signatureY = Math.max(0, Math.min(manualPlacement.y || 0, height - 20));
+  } else if (anchor) {
     page = pages[anchor.pageIndex];
     if (!page) {
       throw new Error("Invalid signature anchor position in document.");

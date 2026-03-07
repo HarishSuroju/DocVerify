@@ -21,6 +21,9 @@ const env = {
   SMTP_USER: process.env.SMTP_USER,
   SMTP_PASS: process.env.SMTP_PASS,
   CLIENT_URL: process.env.CLIENT_URL || "http://localhost:5173",
+  AI_PROVIDER: process.env.AI_PROVIDER || "heuristic",
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+  OPENAI_MODEL: process.env.OPENAI_MODEL || "gpt-4o-mini",
 };
 
 if (env.NODE_ENV === "production") {

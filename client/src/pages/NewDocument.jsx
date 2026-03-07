@@ -70,16 +70,19 @@ export default function NewDocument() {
   const [dateErrors, setDateErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [templateExpiresAt, setTemplateExpiresAt] = useState("");
+  const [templateSigningMode, setTemplateSigningMode] = useState("both");
 
   // Scratch mode
   const [scratchTitle, setScratchTitle] = useState("");
   const [scratchContent, setScratchContent] = useState("");
   const [scratchExpiresAt, setScratchExpiresAt] = useState("");
+  const [scratchSigningMode, setScratchSigningMode] = useState("both");
 
   // Upload mode
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadExpiresAt, setUploadExpiresAt] = useState("");
+  const [uploadSigningMode, setUploadSigningMode] = useState("both");
 
   useEffect(() => {
     api.get("/templates").then((res) => {
@@ -140,6 +143,7 @@ export default function NewDocument() {
         templateId: selectedTemplate._id,
         values,
         expiresAt: toIsoStartOfDay(templateExpiresAt),
+        signingMode: templateSigningMode,
       });
       toast.success("Document generated");
       navigate("/documents");
@@ -161,6 +165,7 @@ export default function NewDocument() {
         title: scratchTitle,
         content: scratchContent,
         expiresAt: toIsoStartOfDay(scratchExpiresAt),
+        signingMode: scratchSigningMode,
       });
       toast.success("Document created");
       navigate("/documents");
@@ -183,6 +188,7 @@ export default function NewDocument() {
         const normalized = toIsoStartOfDay(uploadExpiresAt);
         if (normalized) formData.append("expiresAt", normalized);
       }
+      formData.append("signingMode", uploadSigningMode);
 
       await api.post("/documents/upload", formData, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -302,7 +308,7 @@ export default function NewDocument() {
                   </label>
                   {isDatePlaceholder(p) ? (
                     <div>
-                      <div className="grid grid-cols-[1fr_auto] gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
                         <input
                           value={values[p] || ""}
                           onChange={(e) => {
@@ -352,6 +358,17 @@ export default function NewDocument() {
                   className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
                 />
                 <p className="text-xs text-gray-400 mt-1">Expiry reminders will be generated before this date.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Signature Requirement</label>
+                <select
+                  value={templateSigningMode}
+                  onChange={(e) => setTemplateSigningMode(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                >
+                  <option value="both">Both parties must sign</option>
+                  <option value="sender_only">Sender only (single signature)</option>
+                </select>
               </div>
               <div className="pt-2">
                 <button
@@ -414,6 +431,17 @@ export default function NewDocument() {
                   onChange={(e) => setScratchExpiresAt(e.target.value)}
                   className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Signature Requirement</label>
+                <select
+                  value={scratchSigningMode}
+                  onChange={(e) => setScratchSigningMode(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                >
+                  <option value="both">Both parties must sign</option>
+                  <option value="sender_only">Sender only (single signature)</option>
+                </select>
               </div>
               <div className="pt-2">
                 <button
@@ -506,6 +534,17 @@ export default function NewDocument() {
                   onChange={(e) => setUploadExpiresAt(e.target.value)}
                   className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Signature Requirement</label>
+                <select
+                  value={uploadSigningMode}
+                  onChange={(e) => setUploadSigningMode(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                >
+                  <option value="both">Both parties must sign</option>
+                  <option value="sender_only">Sender only (single signature)</option>
+                </select>
               </div>
               <div className="pt-2">
                 <button

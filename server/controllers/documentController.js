@@ -10,6 +10,9 @@ const pdfService = require("../services/pdfService");
 const auditService = require("../services/auditService");
 const { createNotification } = require("../services/notificationService");
 const { sendDocumentAssignedEmail } = require("../services/emailService");
+const { analyzeDocument } = require("../services/aiService");
+
+const normalizeSigningMode = (value) => (value === "sender_only" ? "sender_only" : "both");
 
 const inferExpiryDateFromValues = (values = {}) => {
   const keys = Object.keys(values || {});
@@ -102,7 +105,7 @@ const extractBlobNameFromUrl = (fileUrl) => {
 // POST /api/documents/generate
 const generateDocument = async (req, res, next) => {
   try {
-    const { templateId, values, expiresAt } = req.body;
+    const { templateId, values, expiresAt, signingMode } = req.body;
 
     const template = await Template.findById(templateId);
     if (!template || !template.isActive) throw new ApiError(404, "Template not found");
@@ -134,6 +137,7 @@ const generateDocument = async (req, res, next) => {
       metadata: {
         encryptedFilledValues: encryptJson(values || {}),
         signatureAnchors,
+        signingMode: normalizeSigningMode(signingMode),
       },
     });
 
@@ -155,7 +159,7 @@ const generateDocument = async (req, res, next) => {
 // POST /api/documents/create-custom
 const createCustomDocument = async (req, res, next) => {
   try {
-    const { title, content, expiresAt } = req.body;
+    const { title, content, expiresAt, signingMode } = req.body;
 
     // Generate PDF from raw content
     const { pdfBuffer, signatureAnchors } = await pdfService.generatePdfFromContent(title, content);
@@ -171,7 +175,10 @@ const createCustomDocument = async (req, res, next) => {
       assignedBy: req.user._id,
       source: "custom",
       expiresAt: expiresAt ? new Date(expiresAt) : null,
-      metadata: { signatureAnchors },
+      metadata: {
+        signatureAnchors,
+        signingMode: normalizeSigningMode(signingMode),
+      },
     });
 
     await auditService.log({
@@ -201,6 +208,7 @@ const uploadDocument = async (req, res, next) => {
     }
 
     const title = req.body.title || req.file.originalname.replace(/\.pdf$/i, "");
+    const signingMode = normalizeSigningMode(req.body.signingMode);
     const expiryDate = req.body.expiresAt ? new Date(req.body.expiresAt) : null;
     if (expiryDate && Number.isNaN(expiryDate.getTime())) {
       throw new ApiError(400, "Invalid expiresAt date");
@@ -216,6 +224,9 @@ const uploadDocument = async (req, res, next) => {
       assignedBy: req.user._id,
       source: "upload",
       expiresAt: expiryDate,
+      metadata: {
+        signingMode,
+      },
     });
 
     await auditService.log({
@@ -328,6 +339,11 @@ const getDocumentById = async (req, res, next) => {
 
 // PATCH /api/documents/:id/assign
 const assignDocument = async (req, res, next) => {
+      const signingMode = normalizeSigningMode(doc.metadata?.signingMode);
+      if (signingMode === "sender_only") {
+        throw new ApiError(400, "This agreement is configured as sender-only and does not require receiver signature");
+      }
+
   try {
     const { assignTo } = req.body;
     const doc = await Document.findById(req.params.id);
@@ -421,6 +437,48 @@ const downloadDocument = async (req, res, next) => {
   }
 };
 
+// GET /api/documents/:id/ai-insights
+const getDocumentAiInsights = async (req, res, next) => {
+  try {
+    const doc = await Document.findById(req.params.id)
+      .populate("templateId", "title")
+      .populate("assignedTo", "name email")
+      .populate("assignedBy", "name email");
+
+    if (!doc) throw new ApiError(404, "Document not found");
+
+    if (
+      req.user.role === "user" &&
+      !doc.assignedTo?._id?.equals(req.user._id) &&
+      !doc.assignedBy?._id?.equals(req.user._id)
+    ) {
+      throw new ApiError(403, "Access denied");
+    }
+
+    const clientDoc = toClientDocument(doc);
+
+    const insights = await analyzeDocument({
+      title: clientDoc.title,
+      content: clientDoc.content,
+      status: clientDoc.status,
+      expiresAt: clientDoc.expiresAt,
+    });
+
+    doc.metadata = {
+      ...(doc.metadata || {}),
+      aiInsights: {
+        ...insights,
+        generatedAt: new Date(),
+      },
+    };
+    await doc.save();
+
+    sendResponse(res, 200, "AI insights generated", doc.metadata.aiInsights);
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   generateDocument,
   createCustomDocument,
@@ -430,4 +488,5 @@ module.exports = {
   assignDocument,
   updateStatus,
   downloadDocument,
+  getDocumentAiInsights,
 };

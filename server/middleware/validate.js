@@ -66,17 +66,19 @@ const generateDocumentSchema = z.object({
   templateId: z.string().min(1),
   values: z.record(z.string(), z.string()).optional().default({}),
   expiresAt: z.string().datetime().optional(),
+  signingMode: z.enum(["both", "sender_only"]).optional().default("both"),
 });
 
 const createCustomDocumentSchema = z.object({
   title: z.string().min(1).max(300).trim(),
   content: z.string().min(1),
   expiresAt: z.string().datetime().optional(),
+  signingMode: z.enum(["both", "sender_only"]).optional().default("both"),
 });
 
 const submitVerificationSchema = z.object({
   documentType: z.enum(["aadhaar", "passport", "driving_license", "other"]),
-  selfieSource: z.enum(["camera"]),
+  selfieSource: z.enum(["camera"]).optional(),
 });
 
 const confirmVerificationOtpSchema = z.object({
@@ -86,6 +88,14 @@ const confirmVerificationOtpSchema = z.object({
 
 const signDocumentSchema = z.object({
   signatureImage: z.string().min(1),
+  signaturePlacement: z
+    .object({
+      page: z.number().int().min(1),
+      x: z.number().min(0),
+      y: z.number().min(0),
+      width: z.number().min(60).max(400),
+    })
+    .optional(),
 });
 
 module.exports = {

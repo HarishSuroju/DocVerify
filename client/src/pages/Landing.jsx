@@ -132,7 +132,7 @@ export default function Landing() {
                 <span className="ml-3 text-xs text-gray-400 font-mono">docverify.app/dashboard</span>
               </div>
               <div className="p-6 md:p-8 bg-gradient-to-br from-gray-50 to-white">
-                <div className="grid grid-cols-4 gap-4 mb-6">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
                   {["12 Users", "34 Documents", "21 Signed", "8 Pending"].map((s, i) => (
                     <div key={i} className="bg-white rounded-xl border border-gray-100 p-4 text-center shadow-sm">
                       <p className="text-xl font-bold text-gray-900">{s.split(" ")[0]}</p>

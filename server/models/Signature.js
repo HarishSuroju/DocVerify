@@ -25,6 +25,10 @@ const signatureSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    signaturePlacement: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
     ipAddress: {
       type: String,
       required: true,

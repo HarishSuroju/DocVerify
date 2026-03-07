@@ -6,6 +6,7 @@ const {
   uploadDocument,
   getDocuments,
   getDocumentById,
+  getDocumentAiInsights,
   assignDocument,
   updateStatus,
   downloadDocument,
@@ -26,6 +27,7 @@ router.post("/generate", validate(generateDocumentSchema), generateDocument);
 router.post("/create-custom", validate(createCustomDocumentSchema), createCustomDocument);
 router.post("/upload", upload.single("file"), uploadDocument);
 router.get("/", getDocuments);
+router.get("/:id/ai-insights", getDocumentAiInsights);
 router.get("/:id", getDocumentById);
 router.get("/:id/download", downloadDocument);
 router.patch("/:id/assign", assignDocument);

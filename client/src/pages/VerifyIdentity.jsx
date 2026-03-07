@@ -223,11 +223,7 @@ export default function VerifyIdentity() {
       toast.error("Government ID file is required");
       return;
     }
-    if (!selfieFile) {
-      toast.error("Selfie is required");
-      return;
-    }
-    if (!capturedSelfie) {
+    if (selfieFile && !capturedSelfie) {
       toast.error("Selfie must be captured using camera");
       return;
     }
@@ -237,8 +233,10 @@ export default function VerifyIdentity() {
       const formData = new FormData();
       formData.append("documentType", documentType);
       formData.append("document", documentFile);
-      formData.append("selfie", selfieFile);
-      formData.append("selfieSource", "camera");
+      if (selfieFile) {
+        formData.append("selfie", selfieFile);
+        formData.append("selfieSource", "camera");
+      }
 
       const { data } = await api.post("/verifications/submit", formData, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -305,7 +303,7 @@ export default function VerifyIdentity() {
 
             <div className="rounded-xl border border-gray-200 p-3.5">
               <div className="flex items-center justify-between gap-3 mb-2.5">
-                <label className="block text-sm font-medium text-gray-700">Selfie (required)</label>
+                <label className="block text-sm font-medium text-gray-700">Selfie (optional)</label>
                 <div className="flex gap-2">
                   {!cameraOn ? (
                     <button
@@ -327,14 +325,13 @@ export default function VerifyIdentity() {
                 </div>
               </div>
 
-              <p className="text-xs text-gray-500 mb-2.5">Selfie capture is camera-only. File uploads are disabled.</p>
+              <p className="text-xs text-gray-500 mb-2.5">Selfie capture is optional and camera-only. File uploads are disabled.</p>
 
               {cameraError && <p className="text-xs text-red-600 mb-2">{cameraError}</p>}
 
               {cameraOn && (
                 <div
-                  className="rounded-xl overflow-hidden border border-gray-200 bg-black mb-2.5 mx-auto"
-                  style={{ width: "500px", height: "500px", maxWidth: "100%" }}
+                  className="rounded-xl overflow-hidden border border-gray-200 bg-black mb-2.5 mx-auto w-full max-w-[500px] aspect-square"
                 >
                   <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
                 </div>
@@ -386,7 +383,7 @@ export default function VerifyIdentity() {
                 value={verificationId}
                 onChange={(e) => setVerificationId(e.target.value)}
                 placeholder="Verification ID"
-                className="min-w-[220px] border border-gray-200 rounded-xl px-3 py-2.5 text-sm"
+                className="w-full sm:min-w-[220px] sm:w-auto border border-gray-200 rounded-xl px-3 py-2.5 text-sm"
               />
               <input
                 value={otp}

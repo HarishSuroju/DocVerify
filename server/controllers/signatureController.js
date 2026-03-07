@@ -26,7 +26,7 @@ const extractBlobNameFromUrl = (fileUrl) => {
 const signDocument = async (req, res, next) => {
   try {
     const { documentId } = req.params;
-    const { signatureImage } = req.body; // base64 PNG data URI
+    const { signatureImage, signaturePlacement } = req.body; // base64 PNG data URI
 
     const doc = await Document.findById(documentId);
     if (!doc) throw new ApiError(404, "Document not found");
@@ -39,12 +39,17 @@ const signDocument = async (req, res, next) => {
     }
 
     const signerRole = isSender ? "sender" : "receiver";
+    const signingMode = doc.metadata?.signingMode === "sender_only" ? "sender_only" : "both";
 
-    if (signerRole === "sender" && doc.assignedTo) {
+    if (signingMode === "both" && signerRole === "sender" && doc.assignedTo) {
       throw new ApiError(400, "Sender must sign before sending to receiver");
     }
 
     if (signerRole === "receiver") {
+      if (signingMode === "sender_only") {
+        throw new ApiError(400, "Receiver signature is not required for this agreement");
+      }
+
       const senderSignature = await Signature.findOne({ documentId, signerRole: "sender" });
       if (!senderSignature) {
         throw new ApiError(400, "Sender signature is required before receiver can sign");
@@ -83,7 +88,8 @@ const signDocument = async (req, res, next) => {
         pdfBuffer,
         sigBuffer,
         signerRole,
-        doc.metadata?.signatureAnchors || {}
+        doc.metadata?.signatureAnchors || {},
+        signaturePlacement || null
       );
     } catch (error) {
       throw new ApiError(400, error.message || "Signature placeholder is missing in the document");
@@ -104,13 +110,14 @@ const signDocument = async (req, res, next) => {
       signerRole,
       signatureImageUrl,
       signedPdfUrl,
+      signaturePlacement: signaturePlacement || null,
       ipAddress: req.ip,
       userAgent: req.get("user-agent"),
     });
 
     // Update document status + latest PDF URL so next signer signs the updated file.
     doc.pdfUrl = signedPdfUrl;
-    doc.status = signerRole === "sender" ? "signed" : "completed";
+    doc.status = signerRole === "sender" && signingMode === "both" ? "signed" : "completed";
     await doc.save();
 
     await auditService.log({

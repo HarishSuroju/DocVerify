@@ -19,8 +19,7 @@ const submitVerification = async (req, res, next) => {
     const selfieFile = req.files?.selfie?.[0] || null;
 
     if (!docFile) throw new ApiError(400, "Government ID document is required");
-    if (!selfieFile) throw new ApiError(400, "Selfie image is required");
-    if (selfieSource !== "camera") {
+    if (selfieFile && selfieSource !== "camera") {
       throw new ApiError(400, "Selfie must be captured through camera");
     }
 
@@ -50,13 +49,16 @@ const submitVerification = async (req, res, next) => {
       docFile.mimetype
     );
 
-    const selfieUpload = await cloudService.upload(
-      selfieFile.buffer,
-      "verifications/selfies",
-      `${req.user._id}-${Date.now()}-${selfieFile.originalname}`,
-      selfieFile.mimetype
-    );
-    const selfieUrl = selfieUpload.url;
+    let selfieUrl = null;
+    if (selfieFile) {
+      const selfieUpload = await cloudService.upload(
+        selfieFile.buffer,
+        "verifications/selfies",
+        `${req.user._id}-${Date.now()}-${selfieFile.originalname}`,
+        selfieFile.mimetype
+      );
+      selfieUrl = selfieUpload.url;
+    }
 
     const verification = await Verification.create({
       userId: req.user._id,
