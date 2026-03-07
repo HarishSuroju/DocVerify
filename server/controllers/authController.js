@@ -6,6 +6,7 @@ const { ApiError, sendResponse } = require("../utils/helpers");
 const config = require("../config/env");
 const auditService = require("../services/auditService");
 const { sendVerificationEmail, sendPasswordResetEmail } = require("../services/emailService");
+const logger = require("../utils/logger");
 
 const OTP_EXPIRY_MS = 10 * 60 * 1000;
 
@@ -57,7 +58,9 @@ const register = async (req, res, next) => {
     });
 
     // Send verification email (fire-and-forget)
-    sendVerificationEmail(email, name, verificationOtp).catch(() => {});
+    sendVerificationEmail(email, name, verificationOtp).catch((err) => {
+      logger.error(`Failed to send verification email to ${email}: ${err.message}`);
+    });
 
     await auditService.log({
       action: "USER_REGISTERED",
@@ -197,7 +200,9 @@ const resendVerification = async (req, res, next) => {
     user.verificationTokenExpiry = new Date(Date.now() + OTP_EXPIRY_MS);
     await user.save();
 
-    sendVerificationEmail(user.email, user.name, verificationOtp).catch(() => {});
+    sendVerificationEmail(user.email, user.name, verificationOtp).catch((err) => {
+      logger.error(`Failed to resend verification email to ${user.email}: ${err.message}`);
+    });
     sendResponse(res, 200, "Verification OTP sent. Please check your inbox.");
   } catch (err) {
     next(err);
