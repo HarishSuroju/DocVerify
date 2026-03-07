@@ -57,10 +57,13 @@ const register = async (req, res, next) => {
       verificationTokenExpiry,
     });
 
-    // Send verification email (fire-and-forget)
-    sendVerificationEmail(email, name, verificationOtp).catch((err) => {
+    let emailSent = true;
+    try {
+      await sendVerificationEmail(email, name, verificationOtp);
+    } catch (err) {
+      emailSent = false;
       logger.error(`Failed to send verification email to ${email}: ${err.message}`);
-    });
+    }
 
     await auditService.log({
       action: "USER_REGISTERED",
@@ -70,7 +73,10 @@ const register = async (req, res, next) => {
       userAgent: req.get("user-agent"),
     });
 
-    sendResponse(res, 201, "Registration successful. Enter the OTP sent to your email to verify your account.", {
+    const msg = emailSent
+      ? "Registration successful. Enter the OTP sent to your email to verify your account."
+      : "Registration successful but we could not send the verification email. Please use Resend OTP to try again.";
+    sendResponse(res, 201, msg, {
       user: {
         id: user._id,
         name: user.name,
@@ -131,23 +137,20 @@ const login = async (req, res, next) => {
     if (!match) throw new ApiError(401, "Invalid credentials");
 
     if (!user.isVerified) {
-      const tokenExpired = !user.verificationTokenExpiry || user.verificationTokenExpiry <= new Date();
-      if (!user.verificationToken || tokenExpired) {
-        const verificationOtp = generateOtp();
-        user.verificationToken = hashOtp(verificationOtp);
-        user.verificationTokenExpiry = new Date(Date.now() + OTP_EXPIRY_MS);
-        await user.save();
-        sendVerificationEmail(user.email, user.name, verificationOtp).catch(() => {});
-      } else {
-        // For active OTPs, send a fresh OTP to avoid exposing stored hashes.
-        const verificationOtp = generateOtp();
-        user.verificationToken = hashOtp(verificationOtp);
-        user.verificationTokenExpiry = new Date(Date.now() + OTP_EXPIRY_MS);
-        await user.save();
-        sendVerificationEmail(user.email, user.name, verificationOtp).catch(() => {});
+      const verificationOtp = generateOtp();
+      user.verificationToken = hashOtp(verificationOtp);
+      user.verificationTokenExpiry = new Date(Date.now() + OTP_EXPIRY_MS);
+      await user.save();
+
+      let otpMessage = "Please verify your email before logging in. A 6-digit OTP has been sent to your inbox.";
+      try {
+        await sendVerificationEmail(user.email, user.name, verificationOtp);
+      } catch (emailErr) {
+        logger.error(`Failed to send verification email during login for ${user.email}: ${emailErr.message}`);
+        otpMessage = "Please verify your email before logging in. We could not send the OTP — please try Resend OTP.";
       }
 
-      throw new ApiError(403, "Please verify your email before logging in. A 6-digit OTP has been sent to your inbox.");
+      throw new ApiError(403, otpMessage);
     }
 
     const { accessToken, refreshToken } = signTokens(user._id);
@@ -200,10 +203,13 @@ const resendVerification = async (req, res, next) => {
     user.verificationTokenExpiry = new Date(Date.now() + OTP_EXPIRY_MS);
     await user.save();
 
-    sendVerificationEmail(user.email, user.name, verificationOtp).catch((err) => {
+    try {
+      await sendVerificationEmail(user.email, user.name, verificationOtp);
+      sendResponse(res, 200, "Verification OTP sent. Please check your inbox.");
+    } catch (err) {
       logger.error(`Failed to resend verification email to ${user.email}: ${err.message}`);
-    });
-    sendResponse(res, 200, "Verification OTP sent. Please check your inbox.");
+      throw new ApiError(502, "Failed to send verification email. Please try again later.");
+    }
   } catch (err) {
     next(err);
   }
@@ -226,7 +232,11 @@ const forgotPassword = async (req, res, next) => {
     user.passwordResetTokenExpiry = new Date(Date.now() + OTP_EXPIRY_MS);
     await user.save();
 
-    sendPasswordResetEmail(user.email, user.name, resetOtp).catch(() => {});
+    try {
+      await sendPasswordResetEmail(user.email, user.name, resetOtp);
+    } catch (err) {
+      logger.error(`Failed to send password reset email to ${user.email}: ${err.message}`);
+    }
     sendResponse(res, 200, "If the account exists, a password reset OTP has been sent.");
   } catch (err) {
     next(err);

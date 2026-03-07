@@ -3,6 +3,7 @@ const env = require("../config/env");
 const logger = require("../utils/logger");
 
 let transporter = null;
+let smtpVerified = false;
 
 const getTransporter = () => {
   if (transporter) return transporter;
@@ -13,16 +14,37 @@ const getTransporter = () => {
   }
 
   transporter = nodemailer.createTransport({
-    host: env.SMTP_HOST,
-    port: Number(env.SMTP_PORT),
-    secure: false,
+    host: env.SMTP_HOST || "smtp.gmail.com",
+    port: Number(env.SMTP_PORT) || 587,
+    secure: Number(env.SMTP_PORT) === 465,
     auth: {
       user: env.SMTP_USER,
       pass: env.SMTP_PASS,
     },
+    tls: {
+      rejectUnauthorized: true,
+      minVersion: "TLSv1.2",
+    },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
   });
 
   return transporter;
+};
+
+const verifySmtpConnection = async () => {
+  const transport = getTransporter();
+  if (!transport) return false;
+  try {
+    await transport.verify();
+    smtpVerified = true;
+    logger.info("SMTP connection verified successfully");
+    return true;
+  } catch (err) {
+    logger.error(`SMTP connection verification failed: ${err.message}`);
+    return false;
+  }
 };
 
 const sendVerificationEmail = async (to, name, otp) => {
@@ -166,6 +188,7 @@ const sendIdentityVerificationOtpEmail = async (to, name, otp) => {
 };
 
 module.exports = {
+  verifySmtpConnection,
   sendVerificationEmail,
   sendDocumentAssignedEmail,
   sendDocumentSignedEmail,

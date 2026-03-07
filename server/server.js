@@ -10,6 +10,7 @@ const env = require("./config/env");
 const connectDB = require("./config/db");
 const logger = require("./utils/logger");
 const errorHandler = require("./middleware/errorHandler");
+const { verifySmtpConnection } = require("./services/emailService");
 
 // Route imports
 const authRoutes = require("./routes/authRoutes");
@@ -86,6 +87,7 @@ const PORT = env.PORT || 5000;
 connectDB().then(() => {
   app.listen(PORT, () => {
     logger.info(`Server running on port ${PORT} [${env.NODE_ENV}]`);
+    verifySmtpConnection().catch(() => {});
   });
 });
 
