@@ -3,6 +3,7 @@ const Document = require("../models/Document");
 const Signature = require("../models/Signature");
 const AuditLog = require("../models/AuditLog");
 const Verification = require("../models/Verification");
+const cloudService = require("../services/cloudService");
 const { ApiError, sendResponse } = require("../utils/helpers");
 
 // GET /api/admin/dashboard
@@ -33,9 +34,15 @@ const getDashboard = async (req, res, next) => {
 const getUsers = async (req, res, next) => {
   try {
     const users = await User.find()
-      .select("name email role isVerified identityVerified createdAt")
+      .select("name email role isVerified identityVerified createdAt profileImageUrl")
       .sort("-createdAt");
-    sendResponse(res, 200, "Users retrieved", users);
+    const withAccessibleUrls = await Promise.all(
+      users.map(async (u) => ({
+        ...u.toObject(),
+        profileImageUrl: await cloudService.toAccessibleUrl(u.profileImageUrl, 60),
+      }))
+    );
+    sendResponse(res, 200, "Users retrieved", withAccessibleUrls);
   } catch (err) {
     next(err);
   }

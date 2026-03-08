@@ -34,6 +34,24 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    organization: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 200,
+    },
+    profileImageUrl: {
+      type: String,
+      default: "",
+    },
+    verificationImageUrl: {
+      type: String,
+      default: "",
+    },
+    profileCompleted: {
+      type: Boolean,
+      default: false,
+    },
     verificationDocUrl: {
       type: String,
       default: null,

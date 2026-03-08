@@ -6,6 +6,7 @@ const { ApiError, sendResponse } = require("../utils/helpers");
 const config = require("../config/env");
 const auditService = require("../services/auditService");
 const { sendVerificationEmail, sendPasswordResetEmail } = require("../services/emailService");
+const cloudService = require("../services/cloudService");
 const logger = require("../utils/logger");
 
 const OTP_EXPIRY_MS = 10 * 60 * 1000;
@@ -14,6 +15,19 @@ const generateOtp = () => crypto.randomInt(100000, 1000000).toString();
 const hashOtp = (otp) => crypto.createHash("sha256").update(otp).digest("hex");
 const hashRefreshToken = (token) =>
   crypto.createHash("sha256").update(`${token}:${config.REFRESH_TOKEN_SECRET}`).digest("hex");
+
+const toClientUser = async (user) => ({
+  id: user._id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  isVerified: user.isVerified,
+  identityVerified: user.identityVerified,
+  organization: user.organization,
+  profileImageUrl: await cloudService.toAccessibleUrl(user.profileImageUrl, 60),
+  verificationImageUrl: await cloudService.toAccessibleUrl(user.verificationImageUrl, 60),
+  profileCompleted: user.profileCompleted,
+});
 
 const signTokens = (userId) => {
   const accessToken = jwt.sign({ id: userId }, config.ACCESS_TOKEN_SECRET, {
@@ -77,14 +91,7 @@ const register = async (req, res, next) => {
       ? "Registration successful. Enter the OTP sent to your email to verify your account."
       : "Registration successful but we could not send the verification email. Please use Resend OTP to try again.";
     sendResponse(res, 201, msg, {
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        isVerified: false,
-        identityVerified: false,
-      },
+      user: await toClientUser(user),
       requiresEmailVerification: true,
     });
   } catch (err) {
@@ -166,14 +173,7 @@ const login = async (req, res, next) => {
     });
 
     sendResponse(res, 200, "Login successful", {
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        isVerified: user.isVerified,
-        identityVerified: user.identityVerified,
-      },
+      user: await toClientUser(user),
       accessToken,
       refreshToken,
     });
@@ -353,8 +353,61 @@ const logout = async (req, res, next) => {
 
 // GET /api/auth/me
 const getMe = async (req, res) => {
-  const { _id, name, email, role, isVerified, identityVerified, createdAt } = req.user;
-  sendResponse(res, 200, "Profile retrieved", { id: _id, name, email, role, isVerified, identityVerified, createdAt });
+  sendResponse(res, 200, "Profile retrieved", {
+    ...(await toClientUser(req.user)),
+    createdAt: req.user.createdAt,
+  });
+};
+
+// POST /api/auth/update-profile
+const updateProfile = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) throw new ApiError(404, "User not found");
+
+    const nextName = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+    const nextOrganization = typeof req.body?.organization === "string" ? req.body.organization.trim() : "";
+
+    if (!nextName || nextName.length < 2 || nextName.length > 100) {
+      throw new ApiError(400, "Name must be between 2 and 100 characters");
+    }
+
+    user.name = nextName;
+    user.organization = nextOrganization.slice(0, 200);
+
+    // Profile image upload
+    const profileImageFile = req.files?.profileImage?.[0];
+    if (profileImageFile) {
+      const pFile = profileImageFile;
+      const filename = `${user._id}-${Date.now()}-${pFile.originalname}`;
+      const { url } = await cloudService.upload(pFile.buffer, "profiles", filename, pFile.mimetype);
+      user.profileImageUrl = url;
+    }
+    const verificationImageFile = req.files?.verificationImage?.[0];
+    if (verificationImageFile && user.verificationImageUrl) {
+      throw new ApiError(400, "Verification image can only be set once");
+    }
+    if (verificationImageFile) {
+      const vFile = verificationImageFile;
+      const vFilename = `${user._id}-verification-${Date.now()}-${vFile.originalname}`;
+      const { url: vUrl } = await cloudService.upload(vFile.buffer, "verification", vFilename, vFile.mimetype);
+      user.verificationImageUrl = vUrl;
+    }
+    if (!user.verificationImageUrl) {
+      throw new ApiError(400, "Verification image capture is required for first profile update");
+    }
+
+    user.profileCompleted = Boolean(
+      user.name.trim() &&
+      user.organization.trim() &&
+      user.verificationImageUrl
+    );
+    await user.save();
+
+    sendResponse(res, 200, "Profile updated", { user: await toClientUser(user) });
+  } catch (err) {
+    next(err);
+  }
 };
 
 module.exports = {
@@ -368,4 +421,5 @@ module.exports = {
   forgotPassword,
   verifyResetOtp,
   resetPassword,
+  updateProfile,
 };

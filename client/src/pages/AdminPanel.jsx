@@ -18,6 +18,7 @@ import {
   HiOutlineClock,
   HiOutlineShieldCheck,
 } from "react-icons/hi2";
+import UserAvatar from "../components/UserAvatar";
 
 export default function AdminPanel() {
   const [stats, setStats] = useState(null);
@@ -178,9 +179,13 @@ export default function AdminPanel() {
                   <tr key={u._id} className={`hover:bg-gray-50/50 transition ${i !== users.length - 1 ? "border-b border-gray-50" : ""}`}>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-blue-50 rounded-full flex items-center justify-center text-xs font-bold text-blue-600">
-                          {u.name?.charAt(0).toUpperCase()}
-                        </div>
+                        <UserAvatar
+                          name={u.name}
+                          imageUrl={u.profileImageUrl}
+                          sizeClass="w-8 h-8"
+                          textClass="text-xs"
+                          roundedClass="rounded-full"
+                        />
                         <span className="font-medium text-gray-900">{u.name}</span>
                       </div>
                     </td>

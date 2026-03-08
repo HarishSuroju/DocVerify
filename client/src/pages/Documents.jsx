@@ -113,7 +113,7 @@ export default function Documents() {
           <div className="w-6 h-6 border-2 border-gray-200 border-t-blue-600 rounded-full animate-spin" />
         </div>
       ) : documents.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-gray-100 py-16 text-center">
+        <div className="bg-white rounded-2xl border border-slate-200 py-16 text-center">
           <HiOutlineDocumentText className="w-12 h-12 text-gray-300 mx-auto mb-4" />
           <p className="text-gray-500 font-medium">No documents found</p>
           <p className="text-sm text-gray-400 mt-1">Generate your first document from a template.</p>
@@ -126,7 +126,7 @@ export default function Documents() {
           </Link>
         </div>
       ) : (
-        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
           {documents.map((doc, i) => (
             <Link
               key={doc._id}

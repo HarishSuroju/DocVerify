@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -9,6 +9,7 @@ import DashboardLayout from "../components/DashboardLayout";
 import RichTextEditor from "../components/RichTextEditor";
 import { HiOutlineArrowLeft, HiOutlineCodeBracket } from "react-icons/hi2";
 import { Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 const schema = z.object({
   title: z.string().min(1, "Title required"),
@@ -18,6 +19,14 @@ const schema = z.object({
 export default function NewTemplate() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (user && user.role === "admin" && !user.identityVerified) {
+      toast("Identity verification required before creating templates.", { icon: "🔒" });
+      navigate("/verify-identity");
+    }
+  }, [user, navigate]);
 
   const {
     register,

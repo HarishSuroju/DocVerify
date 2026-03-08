@@ -73,6 +73,36 @@ const getSasUrl = async (blobName, expiresInMinutes = 15) => {
   return sasUrl;
 };
 
+const extractBlobNameFromUrl = (fileUrl) => {
+  const parsed = new URL(fileUrl);
+  const pathname = parsed.pathname.replace(/^\//, "");
+
+  if (parsed.hostname.includes(".blob.core.windows.net")) {
+    const parts = pathname.split("/");
+    if (parts.length > 1) return parts.slice(1).join("/");
+  }
+
+  return pathname;
+};
+
+const toAccessibleUrl = async (fileUrl, expiresInMinutes = 60) => {
+  if (!fileUrl) return fileUrl;
+
+  try {
+    if (/^https?:\/\//i.test(fileUrl)) {
+      if (!fileUrl.includes(".blob.core.windows.net")) return fileUrl;
+      const blobName = extractBlobNameFromUrl(fileUrl);
+      return await getSasUrl(blobName, expiresInMinutes);
+    }
+
+    if (fileUrl.startsWith("/uploads/")) return fileUrl;
+    return await getSasUrl(fileUrl, expiresInMinutes);
+  } catch (err) {
+    logger.warn(`Failed to build accessible URL for blob (${fileUrl}): ${err.message}`);
+    return fileUrl;
+  }
+};
+
 const deleteBlob = async (blobName) => {
   const container = getContainerClient();
   if (!container) return;
@@ -82,4 +112,4 @@ const deleteBlob = async (blobName) => {
   logger.info(`Deleted blob: ${blobName}`);
 };
 
-module.exports = { upload, getSasUrl, deleteBlob };
+module.exports = { upload, getSasUrl, toAccessibleUrl, deleteBlob };

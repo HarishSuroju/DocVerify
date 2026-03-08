@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useSearchParams, useNavigate, Link } from "react-router-dom";
+import { motion } from "framer-motion";
 import api from "../lib/api";
 import toast from "react-hot-toast";
 import DashboardLayout from "../components/DashboardLayout";
@@ -11,7 +12,12 @@ import {
   HiOutlinePencilSquare,
   HiOutlineArrowUpTray,
   HiOutlineDocumentText,
+  HiOutlineArrowsPointingOut,
+  HiOutlineArrowsPointingIn,
+  HiOutlineCheckCircle,
+  HiOutlineExclamationCircle,
 } from "react-icons/hi2";
+import { useAuth } from "../context/AuthContext";
 
 const DATE_PLACEHOLDER_REGEX = /(date|dob|birth|expiry|expiration|issue_date|start_date|end_date)/i;
 
@@ -60,9 +66,17 @@ const toIsoStartOfDay = (dateOnly) => {
 };
 
 export default function NewDocument() {
-  const [searchParams] = useSearchParams();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
+  useEffect(() => {
+    if (user && user.role === "admin" && !user.identityVerified) {
+      toast("Identity verification required before creating documents.", { icon: "🔒" });
+      navigate("/verify-identity");
+    }
+  }, [user, navigate]);
+
+  const [searchParams] = useSearchParams();
   const [mode, setMode] = useState("template"); // template | scratch | upload
   const [templates, setTemplates] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
@@ -202,12 +216,39 @@ export default function NewDocument() {
     }
   };
 
-  const preview = selectedTemplate
-    ? Object.entries(values).reduce(
-        (text, [key, val]) => text.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), val || `[${key}]`),
-        selectedTemplate.content
-      )
-    : "";
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+
+  /* Build highlighted preview HTML — preserves paragraphs, newlines, and signature lines */
+  const highlightedPreview = useMemo(() => {
+    if (!selectedTemplate) return "";
+    let html = selectedTemplate.content;
+    // Replace signature placeholders with lines or signed values
+    for (const [key, val] of Object.entries(values)) {
+      const regex = new RegExp(`\\{\\{${key}\\}\\}`, "g");
+      if (key === "sender_signature" || key === "receiver_signature") {
+        if (val) {
+          html = html.replace(regex, `<span class='doc-signature-value'>${escapeHtml(val)}</span>`);
+        } else {
+          html = html.replace(regex, `<span class='doc-signature-line'></span>`);
+        }
+      } else if (val) {
+        html = html.replace(regex, `<span class='doc-filled-value'>${escapeHtml(val)}</span>`);
+      } else {
+        html = html.replace(regex, `<span class='doc-placeholder-badge'>${key.replace(/_/g, " ")}</span>`);
+      }
+    }
+    // Convert newlines to paragraphs and <br>
+    html = html
+      .split(/\n{2,}/g)
+      .map((para) => `<p>${para.replace(/\n/g, '<br />')}</p>`)
+      .join("");
+    return html;
+  }, [selectedTemplate, values]);
+
+  const filledCount = selectedTemplate
+    ? Object.values(values).filter((v) => v.trim()).length
+    : 0;
+  const totalFields = selectedTemplate?.placeholders?.length || 0;
 
   const modes = [
     { key: "template", label: "From Template", icon: HiOutlineRectangleStack },
@@ -286,112 +327,217 @@ export default function NewDocument() {
       )}
 
       {mode === "template" && selectedTemplate && (
-        <div className="grid lg:grid-cols-2 gap-8">
-          <div className="bg-white rounded-2xl border border-gray-100 p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-lg font-bold text-gray-900">{selectedTemplate.title}</h2>
-                <p className="text-xs text-gray-400 mt-1">{selectedTemplate.placeholders.length} fields to fill</p>
-              </div>
-              <button
-                onClick={() => setSelectedTemplate(null)}
-                className="text-xs text-blue-600 hover:underline cursor-pointer"
-              >
-                Change template
-              </button>
-            </div>
-            <form onSubmit={handleTemplateSubmit} className="space-y-4">
-              {selectedTemplate.placeholders.map((p) => (
-                <div key={p}>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5 capitalize">
-                    {p.replace(/_/g, " ")}
-                  </label>
-                  {isDatePlaceholder(p) ? (
-                    <div>
-                      <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
-                        <input
-                          value={values[p] || ""}
-                          onChange={(e) => {
-                            const raw = e.target.value.replace(/[^0-9/]/g, "").slice(0, 10);
-                            setValues((prev) => ({ ...prev, [p]: raw }));
-
-                            if (!raw || /^\d{2}\/\d{2}\/\d{4}$/.test(raw)) {
-                              setDateErrors((prev) => ({ ...prev, [p]: "" }));
-                              return;
-                            }
-
-                            setDateErrors((prev) => ({ ...prev, [p]: "Use dd/mm/yyyy format" }));
-                          }}
-                          className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-                          placeholder="dd/mm/yyyy"
-                          inputMode="numeric"
-                        />
-                        <input
-                          type="date"
-                          value={toIsoDate(values[p] || "")}
-                          onChange={(e) => {
-                            setValues((prev) => ({ ...prev, [p]: toDisplayDate(e.target.value) }));
-                            setDateErrors((prev) => ({ ...prev, [p]: "" }));
-                          }}
-                          className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-                          aria-label={`${p} date picker`}
-                        />
-                      </div>
-                      {dateErrors[p] && <p className="text-red-500 text-xs mt-1.5">{dateErrors[p]}</p>}
+        <div className="flex flex-col lg:flex-row gap-0 lg:gap-0 -mx-4 sm:-mx-6 lg:-mx-8">
+          {/* ====== LEFT PANEL — Form ====== */}
+          <div className={`${previewExpanded ? "hidden lg:block lg:w-[380px]" : "w-full lg:w-[45%]"} shrink-0 border-r border-slate-200 transition-all duration-300`}>
+            <div className="sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto">
+              <div className="p-6">
+                {/* Header */}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-xl flex items-center justify-center">
+                      <HiOutlineRectangleStack className="w-5 h-5 text-indigo-600" />
                     </div>
-                  ) : (
-                    <input
-                      value={values[p] || ""}
-                      onChange={(e) => setValues((prev) => ({ ...prev, [p]: e.target.value }))}
-                      className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-                      placeholder={`Enter ${p.replace(/_/g, " ")}`}
-                    />
-                  )}
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-900">{selectedTemplate.title}</h2>
+                      <p className="text-xs text-slate-400">{totalFields} fields to fill</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSelectedTemplate(null)}
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition cursor-pointer"
+                  >
+                    Change
+                  </button>
                 </div>
-              ))}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Expiry Date (optional)</label>
-                <input
-                  type="date"
-                  value={templateExpiresAt}
-                  onChange={(e) => setTemplateExpiresAt(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-                />
-                <p className="text-xs text-gray-400 mt-1">Expiry reminders will be generated before this date.</p>
+
+                {/* Progress bar */}
+                <div className="mt-4 mb-6">
+                  <div className="flex items-center justify-between text-xs mb-1.5">
+                    <span className="text-slate-500 font-medium">
+                      {filledCount === totalFields ? (
+                        <span className="flex items-center gap-1 text-emerald-600">
+                          <HiOutlineCheckCircle className="w-3.5 h-3.5" />
+                          All fields complete
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-amber-600">
+                          <HiOutlineExclamationCircle className="w-3.5 h-3.5" />
+                          {filledCount} of {totalFields} filled
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-slate-400">{Math.round((filledCount / totalFields) * 100)}%</span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <motion.div
+                      className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${totalFields ? (filledCount / totalFields) * 100 : 0}%` }}
+                      transition={{ duration: 0.4, ease: "easeOut" }}
+                    />
+                  </div>
+                </div>
+
+                {/* Form fields */}
+                <form onSubmit={handleTemplateSubmit} className="space-y-4">
+                  <div className="space-y-3">
+                    {selectedTemplate.placeholders.map((p, idx) => (
+                      <motion.div
+                        key={p}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.03 }}
+                        className="group"
+                      >
+                        <label className="flex items-center gap-2 text-sm font-medium text-slate-700 mb-1.5">
+                          <span className="w-5 h-5 rounded-md bg-slate-100 text-[10px] font-bold text-slate-400 flex items-center justify-center shrink-0">
+                            {idx + 1}
+                          </span>
+                          <span className="capitalize">{p.replace(/_/g, " ")}</span>
+                          {values[p]?.trim() && (
+                            <HiOutlineCheckCircle className="w-3.5 h-3.5 text-emerald-500 ml-auto" />
+                          )}
+                        </label>
+                        {isDatePlaceholder(p) ? (
+                          <div>
+                            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                              <input
+                                value={values[p] || ""}
+                                onChange={(e) => {
+                                  const raw = e.target.value.replace(/[^0-9/]/g, "").slice(0, 10);
+                                  setValues((prev) => ({ ...prev, [p]: raw }));
+                                  if (!raw || /^\d{2}\/\d{2}\/\d{4}$/.test(raw)) {
+                                    setDateErrors((prev) => ({ ...prev, [p]: "" }));
+                                    return;
+                                  }
+                                  setDateErrors((prev) => ({ ...prev, [p]: "Use dd/mm/yyyy format" }));
+                                }}
+                                className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition bg-white"
+                                placeholder="dd/mm/yyyy"
+                                inputMode="numeric"
+                              />
+                              <input
+                                type="date"
+                                value={toIsoDate(values[p] || "")}
+                                onChange={(e) => {
+                                  setValues((prev) => ({ ...prev, [p]: toDisplayDate(e.target.value) }));
+                                  setDateErrors((prev) => ({ ...prev, [p]: "" }));
+                                }}
+                                className="border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                                aria-label={`${p} date picker`}
+                              />
+                            </div>
+                            {dateErrors[p] && <p className="text-red-500 text-xs mt-1.5">{dateErrors[p]}</p>}
+                          </div>
+                        ) : (
+                          <input
+                            value={values[p] || ""}
+                            onChange={(e) => setValues((prev) => ({ ...prev, [p]: e.target.value }))}
+                            className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition bg-white"
+                            placeholder={`Enter ${p.replace(/_/g, " ")}`}
+                          />
+                        )}
+                      </motion.div>
+                    ))}
+                  </div>
+
+                  {/* Divider */}
+                  <div className="border-t border-slate-100 pt-4 mt-4 space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Expiry Date (optional)</label>
+                      <input
+                        type="date"
+                        value={templateExpiresAt}
+                        onChange={(e) => setTemplateExpiresAt(e.target.value)}
+                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">Signature Requirement</label>
+                      <select
+                        value={templateSigningMode}
+                        onChange={(e) => setTemplateSigningMode(e.target.value)}
+                        className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition bg-white"
+                      >
+                        <option value="both">Both parties must sign</option>
+                        <option value="sender_only">Sender only (single signature)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="pt-3">
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl text-sm font-semibold hover:shadow-lg hover:shadow-indigo-200/50 disabled:opacity-50 transition-all duration-300 cursor-pointer"
+                    >
+                      {loading && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                      {loading ? "Generating PDF..." : "Generate PDF"}
+                    </button>
+                  </div>
+                </form>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Signature Requirement</label>
-                <select
-                  value={templateSigningMode}
-                  onChange={(e) => setTemplateSigningMode(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-                >
-                  <option value="both">Both parties must sign</option>
-                  <option value="sender_only">Sender only (single signature)</option>
-                </select>
-              </div>
-              <div className="pt-2">
+            </div>
+          </div>
+
+          {/* ====== RIGHT PANEL — Live Document Preview ====== */}
+          <div className={`${previewExpanded ? "w-full" : "w-full lg:w-[55%]"} bg-slate-100 transition-all duration-300`}>
+            <div className="sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto">
+              {/* Preview toolbar */}
+              <div className="flex items-center justify-between px-6 py-3 bg-slate-800 text-white">
+                <div className="flex items-center gap-2">
+                  <HiOutlineEye className="w-4 h-4 text-slate-400" />
+                  <span className="text-sm font-medium">Document Preview</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-medium">
+                    LIVE
+                  </span>
+                </div>
                 <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition shadow-sm shadow-blue-200 cursor-pointer"
+                  onClick={() => setPreviewExpanded((prev) => !prev)}
+                  className="p-1.5 rounded-lg hover:bg-slate-700 transition cursor-pointer"
+                  title={previewExpanded ? "Collapse" : "Expand"}
                 >
-                  {loading && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                  {loading ? "Generating..." : "Generate PDF"}
+                  {previewExpanded ? (
+                    <HiOutlineArrowsPointingIn className="w-4 h-4" />
+                  ) : (
+                    <HiOutlineArrowsPointingOut className="w-4 h-4" />
+                  )}
                 </button>
               </div>
-            </form>
-          </div>
-          <div className="bg-white rounded-2xl border border-gray-100 p-6 sticky top-24">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-8 h-8 bg-gray-50 rounded-lg flex items-center justify-center">
-                <HiOutlineEye className="w-4 h-4 text-gray-500" />
-              </div>
-              <h3 className="text-sm font-semibold text-gray-900">Live Preview</h3>
-            </div>
-            <div className="bg-gray-50 rounded-xl p-5 min-h-[300px]">
-              <div className="text-sm text-gray-700 leading-relaxed [&_h1]:text-xl [&_h1]:font-bold [&_h2]:text-lg [&_h2]:font-semibold [&_p]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5">
-                <div dangerouslySetInnerHTML={{ __html: toPreviewHtml(preview) }} />
+
+              {/* A4 Document page */}
+              <div className="p-6 md:p-10 flex justify-center">
+                <div className="doc-page w-full max-w-[720px]">
+                  {/* Document header */}
+                  <div className="doc-page-header">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-8 h-8 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-lg flex items-center justify-center">
+                        <HiOutlineDocumentText className="w-4 h-4 text-white" />
+                      </div>
+                      <span className="text-sm font-bold text-indigo-700 tracking-wide uppercase">VerifyHub</span>
+                    </div>
+                    <h1 className="text-xl font-bold text-slate-900 mb-1">{selectedTemplate.title}</h1>
+                    <p className="text-xs text-slate-400">
+                      Generated on {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                    </p>
+                    <div className="mt-4 border-b-2 border-indigo-600 w-16" />
+                  </div>
+
+                  {/* Document body */}
+                  <div
+                    className="doc-page-body"
+                    dangerouslySetInnerHTML={{ __html: toPreviewHtml(highlightedPreview) }}
+                  />
+
+                  {/* Document footer */}
+                  <div className="doc-page-footer">
+                    <div className="border-t border-slate-200 pt-4 flex items-center justify-between text-[10px] text-slate-400">
+                      <span>VerifyHub &middot; Secure Document Platform</span>
+                      <span>Page 1 of 1</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

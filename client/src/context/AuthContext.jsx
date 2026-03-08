@@ -27,23 +27,35 @@ export function AuthProvider({ children }) {
     bootstrappedRef.current = true;
 
     const token = localStorage.getItem("accessToken");
-    const refreshToken = localStorage.getItem("refreshToken");
+    const refreshTokenStored = localStorage.getItem("refreshToken");
 
-    if (token && refreshToken && !isJwtExpired(token)) {
-      api
-        .get("/auth/me")
-        .then((res) => setUser(res.data.data))
-        .catch(() => {
-          localStorage.removeItem("accessToken");
-          localStorage.removeItem("refreshToken");
-          setUser(null);
-        })
-        .finally(() => setLoading(false));
-    } else {
+    if (!token || !refreshTokenStored) {
       localStorage.removeItem("accessToken");
       localStorage.removeItem("refreshToken");
       setLoading(false);
+      return;
     }
+
+    const bootstrap = async () => {
+      try {
+        // If access token is expired, try refreshing first
+        if (isJwtExpired(token)) {
+          const { data } = await api.post("/auth/refresh", { refreshToken: refreshTokenStored });
+          localStorage.setItem("accessToken", data.data.accessToken);
+          localStorage.setItem("refreshToken", data.data.refreshToken);
+        }
+        const res = await api.get("/auth/me");
+        setUser(res.data.data);
+      } catch {
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("refreshToken");
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    bootstrap();
   }, []);
 
   const login = async (email, password) => {
@@ -94,6 +106,17 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
+  const updateProfile = async (profileData) => {
+    const formData = new FormData();
+    Object.entries(profileData).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === "") return;
+      formData.append(key, value);
+    });
+    const { data } = await api.post("/auth/update-profile", formData);
+    setUser(data.data.user);
+    return data.data.user;
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -107,6 +130,7 @@ export function AuthProvider({ children }) {
         verifyResetOtp,
         resetPassword,
         logout,
+        updateProfile,
       }}
     >
       {children}
